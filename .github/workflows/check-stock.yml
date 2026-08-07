@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/10 * * * *"   # toutes les 10 minutes
   workflow_dispatch:          # permet aussi de lancer manuellement
+    inputs:
+      test_notification:
+        description: "Envoyer une notification de test sur Discord"
+        type: boolean
+        default: false
 
 jobs:
   check-stock:
@@ -21,6 +26,7 @@ jobs:
 
       - env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TEST_NOTIFICATION: ${{ inputs.test_notification }}
         run: python check_stock.py
 
       - name: Sauvegarder l'état pour la prochaine exécution
