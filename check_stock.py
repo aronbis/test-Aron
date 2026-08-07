@@ -1,26 +1,39 @@
 """
-Surveille une page produit p-bandai.com et envoie une notification Discord
-dès que l'objet passe de "en rupture" à "en stock".
+Surveille plusieurs pages produits p-bandai.com et envoie une notification
+Discord dès qu'un objet passe de "en rupture" à "en stock".
 
-Utilise Playwright (un vrai navigateur headless) car le statut du stock
-est injecté dans la page par JavaScript après le chargement initial —
-une simple requête HTTP ne suffit pas à le voir.
+Pour ajouter un objet à surveiller : ajoute un bloc dans la liste PRODUCTS
+ci-dessous, avec un nom (libre, pour reconnaître l'objet dans Discord) et
+l'URL du produit.
 
-Variables d'environnement requises :
+Variable d'environnement requise :
     DISCORD_WEBHOOK_URL : l'URL du webhook Discord
-    PRODUCT_URL         : (optionnel) l'URL du produit à surveiller,
-                           sinon utilise PRODUCT_URL_DEFAULT ci-dessous
 """
 
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict
 
 import requests
 from playwright.sync_api import sync_playwright
 
-PRODUCT_URL_DEFAULT = "https://p-bandai.com/us/item/N2881648002"
+# ----------------------------------------------------------------------
+# Liste des objets à surveiller.
+# Pour en ajouter un : copie un bloc { ... }, change "name" et "url",
+# et ajoute une virgule après le bloc précédent.
+# ----------------------------------------------------------------------
+PRODUCTS = [
+    {
+        "name": "ONE PIECE CARD GAME Premium Card Collection -Ace & Sabo & Luffy-",
+        "url": "https://p-bandai.com/us/item/N2881648002",
+    },
+    # {
+    #     "name": "ONE PIECE CARD GAME Chinese 3rd Anniversary Set",
+    #     "url": "https://p-bandai.com/us/item/N2904549002",
+    # },
+]
+
 STATE_FILE = Path("state.json")
 
 # Le bouton d'achat est le signal le plus fiable.
@@ -34,22 +47,11 @@ OUT_OF_STOCK_KEYWORDS = [
 ]
 
 
-def fetch_rendered_text(url: str) -> str:
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/125.0.0.0 Safari/537.36"
-            )
-        )
-        page.goto(url, wait_until="networkidle", timeout=30000)
-        # Petite marge de sécurité si un appel réseau se déclenche juste après.
-        page.wait_for_timeout(1500)
-        text = page.inner_text("body")
-        browser.close()
-        return text.lower()
+def fetch_rendered_text(page, url: str) -> str:
+    page.goto(url, wait_until="networkidle", timeout=30000)
+    # Petite marge de sécurité si un appel réseau se déclenche juste après.
+    page.wait_for_timeout(1500)
+    return page.inner_text("body").lower()
 
 
 def is_in_stock(page_text: str) -> bool:
@@ -62,41 +64,60 @@ def is_in_stock(page_text: str) -> bool:
     return False
 
 
-def load_previous_state() -> Optional[bool]:
+def load_state() -> Dict[str, bool]:
     if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text()).get("in_stock")
-    return None
+        return json.loads(STATE_FILE.read_text())
+    return {}
 
 
-def save_state(in_stock: bool) -> None:
-    STATE_FILE.write_text(json.dumps({"in_stock": in_stock}))
+def save_state(state: Dict[str, bool]) -> None:
+    STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-def send_discord_notification(webhook_url: str, product_url: str) -> None:
-    payload = {"content": f"🟢 En stock maintenant : {product_url}"}
+def send_discord_notification(webhook_url: str, name: str, url: str) -> None:
+    payload = {"content": f"🟢 En stock maintenant : **{name}**\n{url}"}
     requests.post(webhook_url, json=payload, timeout=10)
 
 
 def main() -> None:
     webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
-    product_url = os.environ.get("PRODUCT_URL", PRODUCT_URL_DEFAULT)
 
     if os.environ.get("TEST_NOTIFICATION", "false").lower() == "true":
-        send_discord_notification(webhook_url, product_url)
+        send_discord_notification(webhook_url, "Test", PRODUCTS[0]["url"])
         print("Notification de test envoyée.")
         return
 
-    page_text = fetch_rendered_text(product_url)
-    in_stock_now = is_in_stock(page_text)
-    was_in_stock = load_previous_state()
+    state = load_state()
 
-    print(f"Stock actuel : {'oui' if in_stock_now else 'non'} (précédent : {was_in_stock})")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            )
+        )
 
-    if in_stock_now and was_in_stock is False:
-        send_discord_notification(webhook_url, product_url)
-        print("Notification envoyée.")
+        for product in PRODUCTS:
+            name = product["name"]
+            url = product["url"]
 
-    save_state(in_stock_now)
+            page_text = fetch_rendered_text(page, url)
+            in_stock_now = is_in_stock(page_text)
+            was_in_stock = state.get(url)
+
+            print(f"{name} -> {'oui' if in_stock_now else 'non'} (précédent : {was_in_stock})")
+
+            if in_stock_now and was_in_stock is False:
+                send_discord_notification(webhook_url, name, url)
+                print("  Notification envoyée.")
+
+            state[url] = in_stock_now
+
+        browser.close()
+
+    save_state(state)
 
 
 if __name__ == "__main__":
