@@ -10,6 +10,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: check-stock
+  cancel-in-progress: false
+
 jobs:
   check-stock:
     runs-on: ubuntu-latest
@@ -36,5 +40,3 @@ jobs:
           git add state.json
           git diff --staged --quiet || git commit -m "update state"
           git push
-
-          
