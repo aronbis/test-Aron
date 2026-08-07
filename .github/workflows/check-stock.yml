@@ -36,3 +36,5 @@ jobs:
           git add state.json
           git diff --staged --quiet || git commit -m "update state"
           git push
+
+          
