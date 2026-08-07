@@ -37,9 +37,26 @@ def fetch_page(url: str) -> str:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/125.0.0.0 Safari/537.36"
-        )
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://p-bandai.com/us/",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
     }
-    response = requests.get(url, headers=headers, timeout=20)
+    session = requests.Session()
+    # On visite d'abord la page d'accueil pour récupérer les cookies,
+    # comme le ferait un vrai navigateur, avant d'aller sur le produit.
+    session.get("https://p-bandai.com/us/", headers=headers, timeout=20)
+    response = session.get(url, headers=headers, timeout=20)
     response.raise_for_status()
     return response.text
 
