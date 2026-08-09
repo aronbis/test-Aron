@@ -2,10 +2,6 @@
 Surveille plusieurs pages produits p-bandai.com et envoie une notification
 Discord dès qu'un objet passe de "en rupture" à "en stock".
 
-Pour ajouter un objet à surveiller : ajoute un bloc dans la liste PRODUCTS
-ci-dessous, avec un nom (libre, pour reconnaître l'objet dans Discord) et
-l'URL du produit.
-
 Variable d'environnement requise :
     DISCORD_WEBHOOK_URL : l'URL du webhook Discord
 """
@@ -46,12 +42,10 @@ OUT_OF_STOCK_KEYWORDS = [
     "notify me",
     "waitlist",
 ]
+ALL_KEYWORDS = IN_STOCK_KEYWORDS + OUT_OF_STOCK_KEYWORDS
 
 # Sélecteurs des éléments cliquables où apparaît le statut d'achat.
 BUTTON_SELECTOR = "button, a[role='button'], input[type='submit'], [class*='btn']"
-
-# Ressources inutiles pour lire du texte : on les bloque pour accélérer.
-BLOCKED_RESOURCES = {"image", "font", "media"}
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -66,34 +60,50 @@ WAIT_FOR_STATUS_JS = """
     const t = document.body.innerText.toLowerCase();
     return %s.some(k => t.includes(k));
 }
-""" % json.dumps(IN_STOCK_KEYWORDS + OUT_OF_STOCK_KEYWORDS)
+""" % json.dumps(ALL_KEYWORDS)
+
+
+def decide(text: str) -> Optional[bool]:
+    """True = en stock, False = rupture, None = rien de reconnaissable."""
+    if any(k in text for k in IN_STOCK_KEYWORDS):
+        return True
+    if any(k in text for k in OUT_OF_STOCK_KEYWORDS):
+        return False
+    return None
 
 
 def check_product(page, url: str) -> Optional[bool]:
-    """Retourne True (en stock), False (rupture), ou None si indéterminé."""
     t0 = time.monotonic()
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
     t1 = time.monotonic()
-    page.wait_for_function(WAIT_FOR_STATUS_JS, timeout=20000)
-    t2 = time.monotonic()
-    print(f"  [temps] chargement {t1 - t0:.1f}s | attente du statut {t2 - t1:.1f}s")
 
-    # On regarde d'abord le texte des boutons : bien plus fiable que toute
-    # la page, qui contient aussi les produits recommandés en bas.
+    status = response.status if response else "?"
+
+    # On attend que le statut apparaisse, mais sans faire échouer le run :
+    # si le délai expire, on lit quand même ce qui est présent.
+    try:
+        page.wait_for_function(WAIT_FOR_STATUS_JS, timeout=25000)
+        waited = f"{time.monotonic() - t1:.1f}s"
+    except PlaywrightError:
+        waited = f"timeout ({time.monotonic() - t1:.1f}s)"
+
+    print(f"  [temps] HTTP {status} | chargement {t1 - t0:.1f}s | statut {waited}")
+
+    # Le texte des boutons est plus fiable que toute la page, qui contient
+    # aussi les produits recommandés en bas.
     button_texts = " | ".join(page.locator(BUTTON_SELECTOR).all_inner_texts()).lower()
+    result = decide(button_texts)
+    if result is not None:
+        return result
 
-    if any(k in button_texts for k in IN_STOCK_KEYWORDS):
-        return True
-    if any(k in button_texts for k in OUT_OF_STOCK_KEYWORDS):
-        return False
-
-    # Repli sur le texte complet si aucun bouton exploitable n'a été trouvé.
     body_text = page.inner_text("body").lower()
-    if any(k in body_text for k in OUT_OF_STOCK_KEYWORDS):
-        return False
-    if any(k in body_text for k in IN_STOCK_KEYWORDS):
-        return True
+    result = decide(body_text)
+    if result is not None:
+        return result
 
+    # Diagnostic : on montre un extrait pour comprendre ce que voit le bot.
+    print(f"  [diagnostic] titre : {page.title()!r}")
+    print(f"  [diagnostic] début du texte : {body_text[:300]!r}")
     return None
 
 
@@ -102,9 +112,9 @@ def check_product_with_retry(page, url: str) -> Optional[bool]:
         try:
             return check_product(page, url)
         except PlaywrightError as exc:
-            print(f"  Tentative {attempt} échouée : {type(exc).__name__}")
-            if attempt == 2:
-                return None
+            print(f"  Tentative {attempt} échouée : {type(exc).__name__} — {exc}"[:400])
+            if attempt == 1:
+                time.sleep(3)
     return None
 
 
@@ -134,27 +144,19 @@ def main() -> None:
     state = load_state()
 
     with sync_playwright() as p:
-        # Les runners GitHub ont déjà Google Chrome installé : on l'utilise
-        # directement, ce qui évite tout téléchargement de navigateur.
-        # Repli sur le Chromium fourni par Playwright si Chrome est absent.
         t_launch = time.monotonic()
+        launch_args = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
         try:
-            browser = p.chromium.launch(channel="chrome")
+            browser = p.chromium.launch(channel="chrome", args=launch_args)
         except PlaywrightError:
             print("Chrome introuvable, repli sur le Chromium de Playwright.")
-            browser = p.chromium.launch()
+            browser = p.chromium.launch(args=launch_args)
         print(f"[temps] lancement du navigateur {time.monotonic() - t_launch:.1f}s")
 
-        context = browser.new_context(user_agent=USER_AGENT)
-        # Bloque images/polices/vidéos : inutiles ici, et c'est l'essentiel
-        # du poids de la page.
-        context.route(
-            "**/*",
-            lambda route: (
-                route.abort()
-                if route.request.resource_type in BLOCKED_RESOURCES
-                else route.continue_()
-            ),
+        context = browser.new_context(
+            user_agent=USER_AGENT,
+            locale="en-US",
+            viewport={"width": 1280, "height": 900},
         )
         page = context.new_page()
 
@@ -166,8 +168,8 @@ def main() -> None:
             in_stock_now = check_product_with_retry(page, url)
 
             if in_stock_now is None:
-                # Statut indéterminé : on ne touche pas à l'état enregistré
-                # pour ne pas provoquer de fausse notification au run suivant.
+                # Statut indéterminé : on conserve l'état enregistré pour ne
+                # pas provoquer de fausse notification au run suivant.
                 print(f"{name} -> INDÉTERMINÉ (état conservé : {was_in_stock})")
                 continue
 
