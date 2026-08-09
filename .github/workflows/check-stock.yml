@@ -18,19 +18,22 @@ jobs:
   check-stock:
     runs-on: ubuntu-latest
     timeout-minutes: 5   # évite qu'un run bloqué embouteille la file d'attente
-    # Image Docker avec Chromium et ses dépendances déjà installés.
-    container:
-      image: mcr.microsoft.com/playwright/python:v1.61.0-noble
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Cache des paquets pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-playwright1610
+          key: pip-${{ runner.os }}-stockbot-v1
 
-      - run: pip install requests playwright==1.61.0
+      # Pas d'installation de navigateur : le runner a déjà Google Chrome,
+      # et le script l'utilise via channel="chrome".
+      - run: pip install requests playwright
 
       - env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -39,7 +42,6 @@ jobs:
 
       - name: Sauvegarder l'état pour la prochaine exécution
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
           git add state.json
