@@ -12,6 +12,7 @@ Variable d'environnement requise :
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -70,8 +71,12 @@ WAIT_FOR_STATUS_JS = """
 
 def check_product(page, url: str) -> Optional[bool]:
     """Retourne True (en stock), False (rupture), ou None si indéterminé."""
+    t0 = time.monotonic()
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    t1 = time.monotonic()
     page.wait_for_function(WAIT_FOR_STATUS_JS, timeout=20000)
+    t2 = time.monotonic()
+    print(f"  [temps] chargement {t1 - t0:.1f}s | attente du statut {t2 - t1:.1f}s")
 
     # On regarde d'abord le texte des boutons : bien plus fiable que toute
     # la page, qui contient aussi les produits recommandés en bas.
@@ -129,7 +134,17 @@ def main() -> None:
     state = load_state()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        # Les runners GitHub ont déjà Google Chrome installé : on l'utilise
+        # directement, ce qui évite tout téléchargement de navigateur.
+        # Repli sur le Chromium fourni par Playwright si Chrome est absent.
+        t_launch = time.monotonic()
+        try:
+            browser = p.chromium.launch(channel="chrome")
+        except PlaywrightError:
+            print("Chrome introuvable, repli sur le Chromium de Playwright.")
+            browser = p.chromium.launch()
+        print(f"[temps] lancement du navigateur {time.monotonic() - t_launch:.1f}s")
+
         context = browser.new_context(user_agent=USER_AGENT)
         # Bloque images/polices/vidéos : inutiles ici, et c'est l'essentiel
         # du poids de la page.
