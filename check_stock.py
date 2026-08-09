@@ -72,6 +72,19 @@ def decide(text: str) -> Optional[bool]:
     return None
 
 
+BLOCK_MARKERS = ["page not available", "can not be displayed", "access denied"]
+
+
+def warm_up(page) -> None:
+    """Visite la page d'accueil d'abord, comme un vrai visiteur, pour
+    récupérer les cookies de session avant d'ouvrir la fiche produit."""
+    try:
+        page.goto("https://p-bandai.com/us/", wait_until="domcontentloaded", timeout=45000)
+        page.wait_for_timeout(2000)
+    except PlaywrightError as exc:
+        print(f"  [info] échauffement ignoré : {type(exc).__name__}")
+
+
 def check_product(page, url: str) -> Optional[bool]:
     t0 = time.monotonic()
     response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -88,6 +101,11 @@ def check_product(page, url: str) -> Optional[bool]:
         waited = f"timeout ({time.monotonic() - t1:.1f}s)"
 
     print(f"  [temps] HTTP {status} | chargement {t1 - t0:.1f}s | statut {waited}")
+
+    early_text = page.inner_text("body").lower()
+    if any(m in early_text for m in BLOCK_MARKERS):
+        print("  [BLOQUÉ] le site a renvoyé sa page d'erreur anti-bot.")
+        return None
 
     # Le texte des boutons est plus fiable que toute la page, qui contient
     # aussi les produits recommandés en bas.
@@ -156,9 +174,15 @@ def main() -> None:
         context = browser.new_context(
             user_agent=USER_AGENT,
             locale="en-US",
+            timezone_id="America/New_York",
             viewport={"width": 1280, "height": 900},
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Upgrade-Insecure-Requests": "1",
+            },
         )
         page = context.new_page()
+        warm_up(page)
 
         for product in PRODUCTS:
             name = product["name"]
