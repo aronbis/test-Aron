@@ -146,6 +146,29 @@ def main() -> None:
         print("ERREUR : la variable d'environnement DISCORD_WEBHOOK_URL n'est pas définie.")
         sys.exit(1)
 
+    # Mode test : déclenché manuellement depuis GitHub Actions (case à cocher
+    # "test_alert" sur le bouton Run workflow). Envoie un message Discord
+    # factice pour vérifier le pipeline complet, sans toucher à l'état réel
+    # ni au vrai statut de stock.
+    if os.environ.get("TEST_ALERT", "").strip().lower() == "true":
+        print("Mode test activé : envoi d'une alerte Discord factice.")
+        test_payload = {
+            "content": (
+                "🧪 **Ceci est un message de TEST.**\n"
+                "Le pipeline GitHub Actions → Discord fonctionne correctement. "
+                "Cette alerte ne signifie PAS que le produit est réellement en stock."
+            )
+        }
+        try:
+            r = requests.post(webhook_url, json=test_payload, timeout=10)
+            if r.status_code not in (200, 204):
+                print(f"[!] Discord a répondu avec le statut {r.status_code} : {r.text}")
+            else:
+                print("Message de test envoyé avec succès.")
+        except requests.RequestException as e:
+            print(f"[!] Échec de l'envoi Discord : {e}")
+        return
+
     state = load_state()
     available = check_stock()
 
