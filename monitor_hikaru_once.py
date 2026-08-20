@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-Vérification UNIQUE du stock - Hikaru Distribution (boutique Shopify)
+Vérification UNIQUE du stock - Hikaru Distribution + CardLab (boutiques Shopify)
 Produit : Premium Card Collection One Piece Card Game
           - ONE PIECE DAY'26 - Édition limitée - Japonais
 
 Conçu pour tourner dans GitHub Actions, déclenché à chaque appel par
 cron-job.org via l'API workflow_dispatch. Ne boucle PAS : une exécution
-= une vérification, puis le process se termine.
+= une vérification des DEUX sites, puis le process se termine.
 
 Variable d'environnement requise :
 - DISCORD_WEBHOOK_URL : URL du webhook Discord (à définir en secret GitHub,
   jamais en clair dans le repo)
+- DISCORD_USER_ID : optionnel, pour mentionner l'utilisateur dans l'alerte
 
-Le fichier state_hikaru.json (à la racine du repo) garde en mémoire le
-dernier état connu entre deux exécutions. Le workflow GitHub Actions est
-responsable de le committer/pousser après chaque run si l'état a changé.
+Le fichier state_stock.json (à la racine du repo) garde en mémoire le
+dernier état connu de CHAQUE site entre deux exécutions. Le workflow
+GitHub Actions est responsable de le committer/pousser après chaque run
+si l'état a changé.
 """
 
 import json
@@ -27,13 +29,24 @@ from bs4 import BeautifulSoup
 
 # --- Configuration ---------------------------------------------------------
 
-PRODUCT_URL = (
-    "https://hikarudistribution.com/products/"
-    "premium-card-collection-one-piece-card-game-one-piece-day-26-edition-limitee-japonais"
-)
-JSON_URL = PRODUCT_URL + ".json"
+SITES = {
+    "hikaru": {
+        "label": "Hikaru Distribution",
+        "product_url": (
+            "https://hikarudistribution.com/products/"
+            "premium-card-collection-one-piece-card-game-one-piece-day-26-edition-limitee-japonais"
+        ),
+    },
+    "cardlab": {
+        "label": "CardLab",
+        "product_url": (
+            "https://cardlabtcg.com/products/"
+            "premium-card-collection-one-piece-card-game-one-piece-day-26-edition-limitee-japonais"
+        ),
+    },
+}
 
-STATE_FILE = Path(__file__).resolve().parent / "state_hikaru.json"
+STATE_FILE = Path(__file__).resolve().parent / "state_stock.json"
 
 HEADERS = {
     "User-Agent": (
@@ -54,21 +67,27 @@ def load_state() -> dict:
         try:
             return json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            print("[!] state_hikaru.json illisible, on repart de zéro.")
-    return {"available": None}
+            print("[!] state_stock.json illisible, on repart de zéro.")
+    return {}
 
 
 def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
 
 
-def send_discord_alert(webhook_url: str) -> None:
+def mention_prefix() -> str:
+    """Retourne '<@ID> ' si DISCORD_USER_ID est défini, sinon une chaîne vide."""
+    user_id = os.environ.get("DISCORD_USER_ID", "").strip()
+    return f"<@{user_id}> " if user_id else ""
+
+
+def send_discord_alert(webhook_url: str, site_label: str, product_url: str) -> None:
     payload = {
         "content": (
-            "🚨 **EN STOCK !**\n"
+            f"{mention_prefix()}🚨 **EN STOCK !**\n"
             "Premium Card Collection One Piece Card Game - ONE PIECE DAY'26 "
-            "(Hikaru Distribution) vient de passer disponible !\n"
-            f"{PRODUCT_URL}"
+            f"vient de passer disponible sur **{site_label}** !\n"
+            f"Lien direct : {product_url}"
         )
     }
     try:
@@ -81,9 +100,10 @@ def send_discord_alert(webhook_url: str) -> None:
 
 # --- Détection de stock -------------------------------------------------------
 
-def check_stock_via_json() -> bool | None:
+def check_stock_via_json(product_url: str) -> bool | None:
+    json_url = product_url + ".json"
     try:
-        resp = requests.get(JSON_URL, headers=HEADERS, timeout=15)
+        resp = requests.get(json_url, headers=HEADERS, timeout=15)
     except requests.RequestException as e:
         print(f"[!] Erreur réseau (JSON) : {e}")
         return None
@@ -106,9 +126,9 @@ def check_stock_via_json() -> bool | None:
     return any(v.get("available") is True for v in variants)
 
 
-def check_stock_via_html() -> bool | None:
+def check_stock_via_html(product_url: str) -> bool | None:
     try:
-        resp = requests.get(PRODUCT_URL, headers=HEADERS, timeout=15)
+        resp = requests.get(product_url, headers=HEADERS, timeout=15)
     except requests.RequestException as e:
         print(f"[!] Erreur réseau (HTML) : {e}")
         return None
@@ -130,12 +150,12 @@ def check_stock_via_html() -> bool | None:
     return None
 
 
-def check_stock() -> bool | None:
-    result = check_stock_via_json()
+def check_stock(product_url: str) -> bool | None:
+    result = check_stock_via_json(product_url)
     if result is not None:
         return result
     print("[i] JSON indéterminé, tentative de repli via HTML...")
-    return check_stock_via_html()
+    return check_stock_via_html(product_url)
 
 
 # --- Point d'entrée -------------------------------------------------------------
@@ -154,7 +174,7 @@ def main() -> None:
         print("Mode test activé : envoi d'une alerte Discord factice.")
         test_payload = {
             "content": (
-                "🧪 **Ceci est un message de TEST.**\n"
+                f"{mention_prefix()}🧪 **Ceci est un message de TEST.**\n"
                 "Le pipeline GitHub Actions → Discord fonctionne correctement. "
                 "Cette alerte ne signifie PAS que le produit est réellement en stock."
             )
@@ -170,23 +190,34 @@ def main() -> None:
         return
 
     state = load_state()
-    available = check_stock()
+    state_changed = False
 
-    if available is None:
-        print(f"Résultat indéterminé, état conservé ({state.get('available')}).")
-        return
+    for site_key, site_info in SITES.items():
+        label = site_info["label"]
+        product_url = site_info["product_url"]
 
-    label = "EN STOCK" if available else "indisponible"
-    print(f"Statut : {label}")
+        print(f"--- Vérification : {label} ---")
+        available = check_stock(product_url)
+        previous = state.get(site_key, {}).get("available")
 
-    if available and state.get("available") is not True:
-        print(">>> Passage en stock détecté, envoi de l'alerte Discord.")
-        send_discord_alert(webhook_url)
+        if available is None:
+            print(f"Résultat indéterminé pour {label}, état conservé ({previous}).")
+            continue
 
-    if available != state.get("available"):
-        state["available"] = available
+        status_label = "EN STOCK" if available else "indisponible"
+        print(f"Statut {label} : {status_label}")
+
+        if available and previous is not True:
+            print(f">>> Passage en stock détecté sur {label}, envoi de l'alerte Discord.")
+            send_discord_alert(webhook_url, label, product_url)
+
+        if available != previous:
+            state[site_key] = {"available": available}
+            state_changed = True
+
+    if state_changed:
         save_state(state)
-        print("État mis à jour dans state_hikaru.json.")
+        print("État mis à jour dans state_stock.json.")
     else:
         print("Pas de changement d'état.")
 
