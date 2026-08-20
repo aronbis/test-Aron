@@ -37,7 +37,7 @@ jobs:
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
         run: python monitor_hikaru_once.py
 
-           - name: Commit updated state (si changement)
+      - name: Commit updated state (si changement)
         run: |
           git config user.name "stock-bot"
           git config user.email "actions@users.noreply.github.com"
