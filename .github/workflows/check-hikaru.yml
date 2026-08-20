@@ -35,7 +35,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
-        run: python monitor_stock_once.py
+        run: python monitor_hikaru_once.py
 
       - name: Commit updated state (si changement)
         run: |
