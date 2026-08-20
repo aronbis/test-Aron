@@ -1,1 +1,38 @@
+name: Check Hikaru Stock
 
+# Déclenché manuellement uniquement, via l'API workflow_dispatch
+# appelée par cron-job.org (pas de "schedule:" ici : le cron GitHub natif
+# n'est pas assez fiable pour du monitoring de stock).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # nécessaire pour committer state_hikaru.json
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Check stock
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python monitor_hikaru_once.py
+
+      - name: Commit updated state (si changement)
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state_hikaru.json
+          git diff --cached --quiet || git commit -m "update stock state [skip ci]"
+          git push
