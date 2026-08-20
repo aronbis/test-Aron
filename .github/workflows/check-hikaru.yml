@@ -37,10 +37,14 @@ jobs:
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
         run: python monitor_hikaru_once.py
 
-      - name: Commit updated state (si changement)
+           - name: Commit updated state (si changement)
         run: |
           git config user.name "stock-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add state_stock.json
-          git diff --cached --quiet || git commit -m "update stock state [skip ci]"
-          git push
+          if [ -f state_stock.json ]; then
+            git add state_stock.json
+            git diff --cached --quiet || git commit -m "update stock state [skip ci]"
+            git push
+          else
+            echo "Rien à committer pour l'instant."
+          fi
