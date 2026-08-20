@@ -5,6 +5,12 @@ name: Check Hikaru Stock
 # n'est pas assez fiable pour du monitoring de stock).
 on:
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "Envoyer une alerte Discord de TEST (sans vérifier le vrai stock)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write  # nécessaire pour committer state_hikaru.json
@@ -27,6 +33,7 @@ jobs:
       - name: Check stock
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TEST_ALERT: ${{ github.event.inputs.test_alert }}
         run: python monitor_hikaru_once.py
 
       - name: Commit updated state (si changement)
