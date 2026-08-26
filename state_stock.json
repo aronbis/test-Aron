@@ -24,6 +24,7 @@
       "25": "W/\"page_cache:79833137485:ProductListController:b72b6afcd0fc987f5e1ff3c77c46294f\"",
       "26": "W/\"page_cache:79833137485:ProductListController:b5c8fdfa23ce0cc5722e3ba27f61337b\"",
       "27": "W/\"page_cache:79833137485:ProductListController:36228656870c4464b164eb5aff5dde9e\"",
+      "28": "W/\"page_cache:79833137485:ProductListController:d270153f752401b486f7c686fe9b8c1e\"",
       "3": "W/\"page_cache:79833137485:ProductListController:945b3cfb70d49c2ac35a3079bd177a00\"",
       "4": "W/\"page_cache:79833137485:ProductListController:69f438422b668488d9d089054e0694f4\"",
       "5": "W/\"page_cache:79833137485:ProductListController:fc093277127182bd112ffcbeb6ee40a7\"",
@@ -83,5 +84,16 @@
   },
   "king_jouet": {
     "status": "out_of_stock"
+  },
+  "leclerc": {
+    "seen": {
+      "4582769796364": "One Piece : OP11 Booster Blister (24) FR",
+      "4582769796388": "One Piece : Starter Deck 21 (6) FR",
+      "4582769796418": "One Piece : OP11 Booster Double Pack (8) FR",
+      "4582769894107": "One Piece : OP12 Booster",
+      "4582769894138": "One Piece Op12 Héritage Du Maître Booster Blister - Asmodee",
+      "4582769894619": "One Piece : Starter Deck 22",
+      "4582769912160": "One Piece : Devil Fruit Collection 3 FR"
+    }
   }
 }
