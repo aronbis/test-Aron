@@ -12,9 +12,16 @@ on:
         default: false
 permissions:
   contents: write  # nécessaire pour committer state_stock.json
+# cron-job.org peut déclencher un run alors que le précédent tourne encore :
+# on les sérialise pour éviter deux jobs qui committent state_stock.json en
+# même temps (conflit de push / état écrasé).
+concurrency:
+  group: check-stock
+  cancel-in-progress: false
 jobs:
   check-stock:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -30,14 +37,23 @@ jobs:
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
         run: python monitor_hikaru_once.py
+      # always() : même si l'étape précédente sort en erreur (un site cassé),
+      # l'état des sites qui ont bien répondu doit être sauvegardé.
       - name: Commit updated state (si changement)
+        if: always()
         run: |
           git config user.name "stock-bot"
           git config user.email "actions@users.noreply.github.com"
-          if [ -f state_stock.json ]; then
-            git add state_stock.json
-            git diff --cached --quiet || git commit -m "update stock state [skip ci]"
-            git push
-          else
+          if [ ! -f state_stock.json ]; then
             echo "Rien à committer pour l'instant."
+            exit 0
           fi
+          git add state_stock.json
+          if git diff --cached --quiet; then
+            echo "Pas de changement d'état, rien à committer."
+            exit 0
+          fi
+          git commit -m "update stock state [skip ci]"
+          # Rebase avant push : le run précédent a pu pousser entre-temps.
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
