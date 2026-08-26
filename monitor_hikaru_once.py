@@ -4,9 +4,12 @@ Vérification UNIQUE du stock / de la sortie de produits One Piece Card Game.
 
 Sites et produits surveillés :
 - Hikaru Distribution : Premium Card Collection ONE PIECE DAY'26 (Shopify, check JSON + repli HTML)
-- Hikaru Distribution : tous les Double Pack Set One Piece (via la recherche Shopify,
-                         pour être alerté aussi bien d'un retour en stock que de la mise
-                         en ligne d'une nouvelle référence comme le Double Pack OP17 FR)
+- Hikaru Distribution : tout le catalogue One Piece en français et anglais/US, pour être
+                         alerté aussi bien d'un retour en stock que de la mise en ligne
+                         d'une nouvelle référence (le Double Pack OP17 FR n'ayant pas
+                         encore de fiche produit). Les éditions japonaises, chinoises et
+                         coréennes sont écartées — sauf le ONE PIECE DAY'26 ci-dessus,
+                         suivi explicitement car il n'existe qu'en japonais.
 - King Jouet          : Double Pack OP17 "Les Guerriers les plus puissants au monde"
                          (URL produit déjà existante mais actuellement en 404/410, check HTML direct)
 - Fnac, Smyths Toys, Cultura : Double Pack OP17 (pas encore de fiche produit -> détection
@@ -55,34 +58,48 @@ SITES = {
     "hikaru": {
         "label": "Hikaru Distribution",
         "product_name": "Premium Card Collection One Piece Card Game - ONE PIECE DAY'26",
+        # Exception assumée au filtre FR/US : cette collector n'existe qu'en
+        # édition japonaise, et c'est le produit à l'origine de ce moniteur.
+        # Le filtre de langue ne s'applique qu'au balayage de catalogue.
         "mode": "shopify",
         "product_url": (
             "https://hikarudistribution.com/products/"
             "premium-card-collection-one-piece-card-game-one-piece-day-26-edition-limitee-japonais"
         ),
     },
-    "hikaru_double_pack": {
+    "hikaru_one_piece": {
         "label": "Hikaru Distribution",
-        "product_name": "Double Pack Set One Piece Card Game",
-        # Pas de fiche produit fixe : le Double Pack OP17 français n'existe pas
-        # encore sur la boutique. On interroge le moteur de recherche Shopify à
-        # chaque run pour suivre TOUS les double packs One Piece : on est donc
-        # alerté aussi bien d'un retour en stock que de l'apparition d'une
-        # nouvelle référence (l'OP17 le jour où elle sera mise en ligne).
-        "mode": "shopify_search",
-        "search_url": "https://hikarudistribution.com/search/suggest.json",
-        "search_query": "double pack one piece",
+        "product_name": "One Piece Card Game",
+        # Surveillance de TOUT le catalogue One Piece en français et en anglais/US
+        # (le Double Pack OP17 FR n'a pas encore de fiche produit : on ne peut pas
+        # se contenter d'URL fixes). Le moteur de recherche Shopify plafonnant à
+        # 10 résultats, on balaie products.json page par page en requêtes
+        # conditionnelles : voir scan_shopify_catalog.
+        "mode": "shopify_catalog",
+        "products_url": "https://hikarudistribution.com/products.json",
         "base_url": "https://hikarudistribution.com",
     },
     "king_jouet": {
         "label": "King Jouet",
         "product_name": "Double Pack OP17 - Les Guerriers les plus puissants au monde",
-        "mode": "html_direct",
+        # La fiche est désormais en ligne (elle renvoyait 404/410 auparavant) mais
+        # la page est rendue en JavaScript : le texte visible ne contient pas
+        # l'état du stock. On lit donc le bloc schema.org, présent côté serveur.
+        # Pas de détection de nouveautés ici : les pages catégorie et la recherche
+        # de King Jouet répondent 403 au scraper, seules les fiches passent.
+        "mode": "jsonld",
         "product_url": (
             "https://www.king-jouet.com/jeu-jouet/jeux-societes/cartes-a-collectionner/"
             "ref-1034966-cartes-one-piece-double-booster-op17-les-guerriers-les-plus-puissants-au-monde.htm"
         ),
     },
+    # ATTENTION - Fnac et Smyths sont protégés par Akamai Bot Manager et ne sont
+    # PAS réellement surveillés :
+    #   - Fnac   : HTTP 403 sur toutes les pages, y compris l'accueil
+    #   - Smyths : HTTP 200 avec une page de défi JavaScript d'1 Ko (le piège :
+    #              ça ressemble à un succès, d'où looks_like_bot_challenge)
+    # On les garde configurés pour reprendre automatiquement si le blocage tombe,
+    # mais chaque run le signale explicitement plutôt que de conclure à tort.
     "fnac": {
         "label": "Fnac",
         "product_name": "Double Pack OP17 - Les Guerriers les plus puissants au monde",
@@ -102,8 +119,10 @@ SITES = {
     },
     "cultura": {
         "label": "Cultura",
-        "product_name": "Double Pack OP17 - Les Guerriers les plus puissants au monde",
-        "mode": "category",
+        "product_name": "One Piece Card Game",
+        # Seul site non-Shopify réellement exploitable : la page catégorie liste
+        # les fiches en clair. On y guette toute nouvelle sortie One Piece TCG.
+        "mode": "listing",
         "category_url": "https://www.cultura.com/cartes-a-jouer/cartes-one-piece.html",
         "base_url": "https://www.cultura.com",
     },
@@ -136,6 +155,46 @@ UNAVAILABLE_MARKERS = [
 ]
 AVAILABLE_MARKERS = ["ajouter au panier", "ajouter à mon panier"]
 
+# Formulations typiques des pages de défi anti-bot (Akamai, Imperva, Cloudflare).
+BOT_CHALLENGE_MARKERS = (
+    "pardon our interruption",
+    "_incapsula_",
+    "incapsula incident",
+    "access denied",
+    "are you a robot",
+    "verifying you are human",
+    "enable javascript and cookies",
+    "captcha",
+)
+
+# schema.org/availability -> statut interne. Les fiches JSON-LD sont bien plus
+# fiables que la recherche de mots-clés : King Jouet et Cultura rendent leur page
+# en JavaScript, le texte visible ne contient donc pas l'état réel du stock.
+AVAILABILITY_MAP = {
+    "instock": "in_stock",
+    "limitedavailability": "in_stock",
+    "onlineonly": "in_stock",
+    "preorder": "preorder",
+    "presale": "preorder",
+    "backorder": "out_of_stock",
+    "outofstock": "out_of_stock",
+    "soldout": "out_of_stock",
+    "discontinued": "out_of_stock",
+}
+# Une précommande ouverte est une occasion d'achat : on alerte dessus, avec un
+# libellé distinct pour ne pas la confondre avec du stock immédiat.
+BUYABLE_STATUSES = ("in_stock", "preorder")
+STATUS_LABELS = {
+    "in_stock": "EN STOCK",
+    "preorder": "PRÉCOMMANDE OUVERTE",
+    "out_of_stock": "indisponible",
+    "not_online": "fiche pas encore en ligne",
+}
+STATUS_HEADLINES = {
+    "in_stock": "🚨 **EN STOCK !**",
+    "preorder": "📦 **PRÉCOMMANDE OUVERTE !**",
+}
+
 # Pour la détection d'apparition sur les pages catégorie (Fnac, Smyths, Cultura)
 OP17_PATTERN = re.compile(r"op[\s\-]?17\b", re.IGNORECASE)
 DOUBLEPACK_PATTERN = re.compile(r"double|duo", re.IGNORECASE)
@@ -144,7 +203,22 @@ DOUBLEPACK_PATTERN = re.compile(r"double|duo", re.IGNORECASE)
 # les double packs One Piece, la recherche renvoyant aussi des produits Pokémon
 # dont le titre contient "Double".
 ONEPIECE_PATTERN = re.compile(r"one[\s\-]?piece", re.IGNORECASE)
-SHOPIFY_SEARCH_LIMIT = 10
+
+# Balayage du catalogue Shopify : 250 produits par page, ~19 pages chez Hikaru.
+# La borne haute n'est qu'un garde-fou anti-boucle infinie.
+CATALOG_PAGE_SIZE = 250
+CATALOG_MAX_PAGES = 40
+
+# On ne veut que les éditions françaises et anglaises/US. Les éditions asiatiques
+# sont écartées : chez Hikaru la langue est indiquée en clair dans le titre
+# ("- Japonais"), parfois seulement dans le handle ou le type ("DISPLAY ONE PIECE JPN").
+# Un produit SANS aucun marqueur de langue est conservé : mieux vaut une alerte à
+# vérifier qu'un Double Pack OP17 FR raté parce que son titre n'était pas encore
+# renseigné correctement.
+EXCLUDED_LANG_PATTERN = re.compile(
+    r"japonais|japanese|\bjap\b|\bjpn?\b|chinois|chinese|cor[ée]en|korean|\bkor\b|\bkr\b",
+    re.IGNORECASE,
+)
 
 # Quantité pré-remplie dans les liens "ajouter au panier" envoyés sur Discord.
 CART_QTY = 1
@@ -277,10 +351,12 @@ def send_discord_alert(
     product_name: str,
     product_url: str,
     variant_id=None,
+    status: str = "in_stock",
 ) -> bool:
+    verb = "est ouvert à la précommande" if status == "preorder" else "vient de passer disponible"
     lines = [
-        f"{mention_prefix()}🚨 **EN STOCK !**",
-        f"{product_name} vient de passer disponible sur **{site_label}** !",
+        f"{mention_prefix()}{STATUS_HEADLINES.get(status, STATUS_HEADLINES['in_stock'])}",
+        f"{product_name} {verb} sur **{site_label}** !",
         f"Fiche produit : {product_url}",
     ]
     cart_url, checkout_url = build_cart_urls(product_url, variant_id)
@@ -290,12 +366,20 @@ def send_discord_alert(
     return post_discord(webhook_url, "\n".join(lines))
 
 
-def send_discord_new_product(webhook_url: str, site_label: str, title: str, product_url: str) -> bool:
+def send_discord_new_product(
+    webhook_url: str, site_label: str, title: str, product_url: str, status=None
+) -> bool:
     """Alerte d'apparition : une référence qu'on n'avait jamais vue est mise en ligne."""
+    if status in BUYABLE_STATUSES:
+        suffix = f"— **déjà {STATUS_LABELS[status].lower()}**"
+    elif status == "out_of_stock":
+        suffix = "— pas encore commandable"
+    else:
+        suffix = ""
     return post_discord(
         webhook_url,
-        f"{mention_prefix()}👀 **Nouvelle référence en ligne !**\n"
-        f"« {title} » vient d'apparaître sur **{site_label}** (pas encore en stock).\n"
+        f"{mention_prefix()}👀 **Nouvelle sortie One Piece TCG !**\n"
+        f"« {title} » vient d'apparaître sur **{site_label}** {suffix}\n"
         f"Fiche produit : {product_url}",
     )
 
@@ -329,6 +413,63 @@ def fetch_shopify_variants(product_url: str):
     return variants
 
 
+def looks_like_bot_challenge(resp) -> bool:
+    """
+    Détecte les pages de protection anti-bot.
+
+    Smyths est le cas dangereux : il répond HTTP 200 avec une page de défi
+    JavaScript. Sans cette détection, le scraper conclut "produit pas encore
+    listé" et on croit surveiller un site qui ne répond jamais rien.
+
+    La détection se fait sur des formulations, pas sur la taille : Smyths a servi
+    tantôt 1 Ko d'Akamai, tantôt 6 Ko d'Imperva ("Pardon Our Interruption").
+    """
+    if resp.status_code in (403, 429):
+        return True
+    body = resp.text[:8000].lower()
+    if any(marker in body for marker in BOT_CHALLENGE_MARKERS):
+        return True
+    # Coquille vide : quelques kilo-octets, aucun contenu, juste un script.
+    return len(resp.text) < 3000 and "noindex" in body and "<script" in body
+
+
+def extract_jsonld_product(html: str):
+    """
+    Lit le bloc schema.org/Product d'une fiche produit.
+
+    Retourne (statut, nom, prix) où statut vaut "in_stock", "preorder",
+    "out_of_stock", ou None si la page n'expose pas de données exploitables.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for block in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(block.string or "{}")
+        except (ValueError, TypeError):
+            continue
+        for item in data if isinstance(data, list) else [data]:
+            if not isinstance(item, dict) or item.get("@type") != "Product":
+                continue
+            offers = item.get("offers", {})
+            if isinstance(offers, list):
+                offers = offers[0] if offers else {}
+            raw = str(offers.get("availability", "")).rsplit("/", 1)[-1].lower()
+            status = AVAILABILITY_MAP.get(raw)
+            if status:
+                return status, item.get("name", ""), offers.get("price")
+    return None, "", None
+
+
+def is_excluded_language(*fields) -> bool:
+    """
+    True si le produit est une édition asiatique (japonaise, chinoise, coréenne).
+
+    On ne surveille que les éditions françaises et anglaises/US. Le test porte
+    sur le titre, le handle et le type de produit, la langue n'étant pas toujours
+    indiquée au même endroit.
+    """
+    return bool(EXCLUDED_LANG_PATTERN.search(" ".join(f for f in fields if f)))
+
+
 def first_available_variant_id(variants):
     """Identifiant de la première variante en stock, pour le lien panier."""
     for variant in variants or []:
@@ -342,6 +483,45 @@ def check_stock_via_json(product_url: str):
     if variants is None:
         return None
     return any(v.get("available") is True for v in variants)
+
+
+def check_stock_via_jsonld(product_url: str):
+    """
+    Statut d'une fiche produit via ses données structurées schema.org.
+
+    Retourne "in_stock" / "preorder" / "out_of_stock", "not_online" si la fiche
+    n'existe pas encore, ou None si indéterminé (réseau, blocage, pas de JSON-LD).
+    """
+    try:
+        resp = SESSION.get(product_url, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        print(f"[!] Erreur réseau (JSON-LD) : {e}")
+        return None
+
+    if resp.status_code in (404, 410):
+        print(f"[i] Fiche non disponible (HTTP {resp.status_code}) : produit pas encore en ligne.")
+        return "not_online"
+
+    if looks_like_bot_challenge(resp):
+        print(f"[!] Bloqué par la protection anti-bot (HTTP {resp.status_code}) : "
+              "vérification impossible, état conservé.")
+        return None
+
+    if resp.status_code != 200:
+        print(f"[!] Statut HTTP inattendu : {resp.status_code}")
+        return None
+
+    status, name, price = extract_jsonld_product(resp.text)
+    if status:
+        detail = f" ({price} €)" if price else ""
+        print(f"[i] JSON-LD : {name[:55]}{detail}")
+        return status
+
+    print("[i] Pas de JSON-LD exploitable, repli sur la lecture du texte de la page...")
+    available = check_stock_via_html(product_url)
+    if available is None:
+        return None
+    return "in_stock" if available else "out_of_stock"
 
 
 def check_stock_via_html(product_url: str):
@@ -406,6 +586,11 @@ def check_category_link(category_url: str, base_url: str):
         print(f"[!] Erreur réseau (catégorie) : {e}")
         return None
 
+    if looks_like_bot_challenge(resp):
+        print(f"[!] Page catégorie bloquée par la protection anti-bot (HTTP {resp.status_code}). "
+              "Aucune conclusion possible : ce site n'est PAS réellement surveillé.")
+        return None
+
     if resp.status_code != 200:
         print(f"[!] Statut HTTP inattendu sur la page catégorie : {resp.status_code}")
         return None
@@ -425,55 +610,145 @@ def check_category_link(category_url: str, base_url: str):
     return False
 
 
-def search_shopify_products(site_info: dict):
-    """
-    Interroge le moteur de recherche Shopify et ne garde que les double packs
-    One Piece (la recherche remonte aussi des blisters Pokémon dont le titre
-    contient "Double").
+CULTURA_PRODUCT_PATTERN = re.compile(r"/p-[a-z0-9\-]+?-(\d+)\.html", re.IGNORECASE)
+# Les vignettes du listing sont préfixées par un badge ("Nouveauté", "Précommande",
+# "Meilleure vente") collé au titre : on le retire pour garder un nom lisible.
+LISTING_BADGE_PATTERN = re.compile(
+    r"^(nouveaut[ée]|pr[ée]commande|meilleure vente|promo|exclusivit[ée])\s*", re.IGNORECASE
+)
 
-    Retourne une liste de dicts {handle, title, url, available}, ou None si la
-    vérification n'a pas pu être faite.
+
+def list_category_products(site_info: dict):
     """
-    params = {
-        "q": site_info["search_query"],
-        "resources[type]": "product",
-        "resources[limit]": SHOPIFY_SEARCH_LIMIT,
-    }
+    Liste les produits d'une page catégorie (Cultura), pour repérer toute
+    nouvelle sortie One Piece TCG dès son apparition au catalogue.
+
+    Retourne un dict id -> {title, url}, ou None si la page n'a pas pu être lue.
+    """
+    category_url = site_info["category_url"]
+    base_url = site_info["base_url"].rstrip("/")
     try:
-        resp = SESSION.get(site_info["search_url"], params=params, timeout=TIMEOUT)
+        resp = SESSION.get(category_url, timeout=TIMEOUT)
     except requests.RequestException as e:
-        print(f"[!] Erreur réseau (recherche Shopify) : {e}")
+        print(f"[!] Erreur réseau (listing catégorie) : {e}")
+        return None
+
+    if looks_like_bot_challenge(resp):
+        print(f"[!] Listing bloqué par la protection anti-bot (HTTP {resp.status_code}).")
         return None
 
     if resp.status_code != 200:
-        print(f"[!] Statut HTTP inattendu sur la recherche : {resp.status_code}")
+        print(f"[!] Statut HTTP inattendu sur le listing : {resp.status_code}")
         return None
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    products = {}
+    for link in soup.find_all("a", href=True):
+        match = CULTURA_PRODUCT_PATTERN.search(link["href"])
+        if not match:
+            continue
+        title = LISTING_BADGE_PATTERN.sub("", link.get_text(" ", strip=True))
+        if not title or not ONEPIECE_PATTERN.search(title):
+            continue
+        if is_excluded_language(title):
+            continue
+        href = link["href"]
+        products[match.group(1)] = {
+            "title": title[:120],
+            "url": href if href.startswith("http") else f"{base_url}/{href.lstrip('/')}",
+        }
+    return products
+
+
+def fetch_catalog_page(products_url: str, page: int, etag):
+    """
+    Récupère une page de products.json en requête conditionnelle.
+
+    Retourne (statut, produits, etag) où statut vaut :
+      - "unchanged" : le serveur a répondu 304, la page n'a pas bougé (0 octet)
+      - "ok"        : page téléchargée, `produits` contient la liste brute
+      - "error"     : échec réseau / HTTP
+    """
+    headers = {"If-None-Match": etag} if etag else {}
+    params = {"limit": CATALOG_PAGE_SIZE, "page": page}
+    try:
+        resp = SESSION.get(products_url, params=params, headers=headers, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        print(f"[!] Erreur réseau (catalogue page {page}) : {e}")
+        return "error", None, etag
+
+    if resp.status_code == 304:
+        return "unchanged", None, etag
+
+    if resp.status_code != 200:
+        print(f"[!] Statut HTTP inattendu sur le catalogue page {page} : {resp.status_code}")
+        return "error", None, etag
 
     try:
-        results = resp.json()["resources"]["results"]["products"]
+        products = resp.json()["products"]
     except (ValueError, KeyError, TypeError):
-        print("[!] Réponse de recherche Shopify inexploitable.")
-        return None
+        print(f"[!] Page catalogue {page} inexploitable.")
+        return "error", None, etag
 
+    return "ok", products, resp.headers.get("ETag", "")
+
+
+def scan_shopify_catalog(site_info: dict, etags: dict):
+    """
+    Balaie tout le catalogue Shopify et retourne les produits One Piece FR/US.
+
+    Le moteur de recherche Shopify plafonne à 10 résultats, insuffisant pour
+    suivre l'ensemble du catalogue One Piece. On pagine donc products.json, mais
+    en requêtes conditionnelles (If-None-Match) : une page inchangée répond 304
+    sans corps, ce qui rend un balayage complet quasi gratuit alors qu'un
+    téléchargement intégral pèse ~12 Mo.
+
+    Retourne (produits, nouveaux_etags, complet) :
+      - produits : dict handle -> {title, url, available, variant_id}, limité aux
+        pages réellement téléchargées ; l'appelant fusionne avec l'état connu
+      - complet  : True si toutes les pages ont été relues (aucun 304), auquel cas
+        l'appelant peut remplacer l'état au lieu de le fusionner
+    Retourne (None, etags, False) si le balayage a échoué.
+    """
     base_url = site_info["base_url"].rstrip("/")
-    found = []
-    for product in results:
-        title = product.get("title", "")
-        if not (DOUBLEPACK_PATTERN.search(title) and ONEPIECE_PATTERN.search(title)):
+    products = {}
+    new_etags = {}
+    complete = True
+
+    for page in range(1, CATALOG_MAX_PAGES + 1):
+        key = str(page)
+        status, raw, etag = fetch_catalog_page(site_info["products_url"], page, etags.get(key))
+
+        if status == "error":
+            # Une page manquante fausserait la comparaison (produits vus comme
+            # disparus) : on abandonne le run plutôt que d'alerter à tort.
+            return None, etags, False
+
+        if status == "unchanged":
+            complete = False
+            new_etags[key] = etags.get(key)
             continue
-        handle = product.get("handle")
-        if not handle:
-            continue
-        found.append({
-            "handle": handle,
-            "title": title,
-            # On reconstruit l'URL depuis le handle : celle du JSON traîne des
-            # paramètres de tracking (_pos, _psq...) qui changent à chaque appel
-            # et feraient croire à un changement d'état à chaque run.
-            "url": f"{base_url}/products/{handle}",
-            "available": bool(product.get("available")),
-        })
-    return found
+
+        new_etags[key] = etag
+        if not raw:
+            break  # page vide : fin du catalogue
+
+        for product in raw:
+            title = product.get("title", "")
+            handle = product.get("handle")
+            if not handle or not ONEPIECE_PATTERN.search(title):
+                continue
+            if is_excluded_language(title, handle, product.get("product_type", "")):
+                continue
+            variants = product.get("variants", [])
+            products[handle] = {
+                "title": title,
+                "url": f"{base_url}/products/{handle}",
+                "available": any(v.get("available") for v in variants),
+                "variant_id": first_available_variant_id(variants),
+            }
+
+    return products, new_etags, complete
 
 
 # --- Traitement d'un site -----------------------------------------------------
@@ -541,40 +816,125 @@ def process_category_site(site_key: str, site_info: dict, state: dict, webhook_u
     return True
 
 
-def process_search_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
+def process_jsonld_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
     """
-    Boutique Shopify sans fiche produit fixe : on suit toutes les références qui
-    correspondent à la recherche, par handle. Deux alertes possibles par produit :
-    son apparition dans le catalogue, puis son passage en stock.
+    Fiche produit lue via ses données structurées (King Jouet, Cultura).
+    Alerte sur le stock ET sur l'ouverture des précommandes.
+    """
+    label = site_info["label"]
+    product_url = site_info["product_url"]
+    status = check_stock_via_jsonld(product_url)
+    previous = state.get(site_key, {}).get("status")
+
+    if status is None:
+        print(f"Résultat indéterminé pour {label}, état conservé ({previous}).")
+        return False
+
+    print(f"Statut {label} : {STATUS_LABELS.get(status, status)}")
+
+    if status in BUYABLE_STATUSES and status != previous:
+        print(f">>> Disponibilité détectée sur {label}, envoi de l'alerte Discord.")
+        if not send_discord_alert(
+            webhook_url, label, site_info["product_name"], product_url, status=status
+        ):
+            print(f"[!] Alerte {label} non délivrée, état inchangé pour réessayer plus tard.")
+            return False
+
+    if status != previous:
+        state[site_key] = {"status": status}
+        return True
+    return False
+
+
+def process_listing_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
+    """
+    Page catégorie listant des produits (Cultura) : on alerte à l'apparition de
+    toute nouvelle sortie One Piece TCG, en allant chercher son statut sur sa
+    fiche pour préciser si elle est déjà commandable.
+    """
+    label = site_info["label"]
+    products = list_category_products(site_info)
+
+    if products is None:
+        print(f"Résultat indéterminé pour {label}, état conservé.")
+        return False
+
+    known = state.get(site_key, {}).get("seen", {})
+    baseline = not known
+    if baseline:
+        print(f"[i] Premier passage sur {label} : {len(products)} références "
+              "enregistrées sans alerte.")
+        state[site_key] = {"seen": {pid: p["title"] for pid, p in products.items()}}
+        return True
+
+    new_seen = dict(known)
+    changed = False
+    for pid, product in sorted(products.items()):
+        if pid in known:
+            continue
+        print(f">>> Nouvelle sortie sur {label} : {product['title'][:60]}")
+        # Une seule requête supplémentaire, et seulement pour une nouveauté :
+        # le listing ne dit pas si le produit est déjà commandable.
+        status = check_stock_via_jsonld(product["url"])
+        if not send_discord_new_product(
+            webhook_url, label, product["title"], product["url"], status=status
+        ):
+            print(f"[!] Alerte {label} non délivrée, référence non enregistrée pour réessayer.")
+            continue
+        new_seen[pid] = product["title"]
+        changed = True
+
+    if changed:
+        state[site_key] = {"seen": new_seen}
+    else:
+        print(f"Statut {label} : aucune nouvelle sortie ({len(products)} références suivies).")
+    return changed
+
+
+def process_catalog_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
+    """
+    Boutique Shopify suivie dans son ensemble : on pistes toutes les références
+    One Piece FR/US par handle. Deux alertes possibles par produit : son
+    apparition au catalogue, puis son passage en stock.
 
     Retourne True si l'état a changé.
     """
     label = site_info["label"]
-    products = search_shopify_products(site_info)
+    site_state = state.get(site_key, {})
+    known = site_state.get("products", {})
+    etags = site_state.get("etags", {})
+
+    products, new_etags, complete = scan_shopify_catalog(site_info, etags)
 
     if products is None:
-        print(f"Résultat indéterminé pour {label} (double packs), état conservé.")
+        print(f"Balayage incomplet pour {label}, état conservé.")
         return False
 
-    if not products:
-        print(f"Statut {label} (double packs) : aucune référence correspondante.")
+    if not products and not complete:
+        print(f"Statut {label} : aucune page modifiée depuis le dernier run.")
+        # Les ETags peuvent quand même avoir bougé (page ajoutée en fin de
+        # catalogue) : on les enregistre pour ne pas retélécharger inutilement.
+        if new_etags != etags:
+            state[site_key] = {"products": known, "etags": new_etags}
+            return True
         return False
 
-    known = state.get(site_key, {}).get("products", {})
     # Premier run : on enregistre la photo du catalogue sans rien notifier,
-    # sinon chaque référence déjà en ligne déclencherait une alerte d'apparition.
+    # sinon les dizaines de références déjà en ligne déclencheraient une salve.
     baseline = not known
     if baseline:
-        print(f"[i] Premier passage sur {label} (double packs) : enregistrement sans alerte.")
+        print(f"[i] Premier passage sur {label} : {len(products)} références "
+              f"One Piece FR/US enregistrées sans alerte.")
 
-    new_known = dict(known)
-    changed = False
+    # Un balayage complet fait autorité : on repart de la photo fraîche, ce qui
+    # purge les produits retirés du catalogue. Sinon on fusionne, les pages
+    # inchangées (304) n'ayant pas été retéléchargées.
+    new_known = dict(products_availability(products)) if complete else dict(known)
+    changed = complete and new_known != known
 
-    for product in products:
-        handle = product["handle"]
+    for handle, product in sorted(products.items()):
         previous = known.get(handle)  # True / False / None (jamais vu)
         available = product["available"]
-        print(f"  - {product['title'][:60]} : {'EN STOCK' if available else 'rupture'}")
 
         if baseline:
             new_known[handle] = available
@@ -582,29 +942,38 @@ def process_search_site(site_key: str, site_info: dict, state: dict, webhook_url
             continue
 
         if previous is None:
-            print(f">>> Nouvelle référence détectée sur {label}, envoi de l'alerte Discord.")
+            print(f">>> Nouvelle référence sur {label} : {product['title'][:60]}")
             if not send_discord_new_product(webhook_url, label, product["title"], product["url"]):
                 print(f"[!] Alerte {label} non délivrée, référence non enregistrée pour réessayer.")
+                new_known.pop(handle, None)
                 continue
 
         if available and previous is not True:
-            print(f">>> Passage en stock détecté sur {label}, envoi de l'alerte Discord.")
-            # Le JSON de recherche ne donne pas les identifiants de variantes :
-            # on va les chercher sur la fiche produit pour le lien panier.
-            variant_id = first_available_variant_id(fetch_shopify_variants(product["url"]))
+            print(f">>> Passage en stock sur {label} : {product['title'][:60]}")
             if not send_discord_alert(
-                webhook_url, label, product["title"], product["url"], variant_id
+                webhook_url, label, product["title"], product["url"], product["variant_id"]
             ):
                 print(f"[!] Alerte {label} non délivrée, état inchangé pour réessayer plus tard.")
+                # On enregistre la référence comme indisponible : l'alerte
+                # d'apparition ci-dessus est déjà partie (inutile de la répéter),
+                # mais celle du stock sera rejouée au prochain run.
+                new_known[handle] = False
+                changed = True
                 continue
 
         if previous != available:
             new_known[handle] = available
             changed = True
 
-    if changed:
-        state[site_key] = {"products": new_known}
-    return changed
+    if changed or new_etags != etags:
+        state[site_key] = {"products": new_known, "etags": new_etags}
+        return True
+    return False
+
+
+def products_availability(products: dict) -> dict:
+    """Réduit la photo du catalogue à ce qu'on conserve dans l'état : handle -> dispo."""
+    return {handle: product["available"] for handle, product in products.items()}
 
 
 # --- Point d'entrée -------------------------------------------------------------
@@ -652,10 +1021,15 @@ def main() -> int:
     for site_key, site_info in SITES.items():
         print(f"--- Vérification : {site_info['label']} ---")
         try:
-            if site_info["mode"] in ("shopify", "html_direct"):
+            mode = site_info["mode"]
+            if mode in ("shopify", "html_direct"):
                 changed = process_direct_site(site_key, site_info, state, webhook_url)
-            elif site_info["mode"] == "shopify_search":
-                changed = process_search_site(site_key, site_info, state, webhook_url)
+            elif mode == "shopify_catalog":
+                changed = process_catalog_site(site_key, site_info, state, webhook_url)
+            elif mode == "jsonld":
+                changed = process_jsonld_site(site_key, site_info, state, webhook_url)
+            elif mode == "listing":
+                changed = process_listing_site(site_key, site_info, state, webhook_url)
             else:
                 changed = process_category_site(site_key, site_info, state, webhook_url)
         except Exception as e:  # noqa: BLE001 - un site cassé ne doit pas bloquer les autres
