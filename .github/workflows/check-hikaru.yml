@@ -50,7 +50,9 @@ jobs:
           # Attention : en syntaxe GitHub, "cond && '' || autre" renvoie toujours
           # "autre", la chaîne vide étant falsy. Les deux branches doivent donc
           # être non vides — d'où la liste complète écrite en toutes lettres.
-          MONITOR_SITES: ${{ github.event.inputs.report == 'true' && 'hikaru,hikaru_one_piece,king_jouet,fnac,smyths,cultura,leclerc' || 'hikaru,hikaru_one_piece,king_jouet,leclerc' }}
+          # "hikaru_one_piece" (tout le catalogue Hikaru) est volontairement absent
+          # des deux listes : seule la promo ONE PIECE DAY'26 y est suivie.
+          MONITOR_SITES: ${{ github.event.inputs.report == 'true' && 'hikaru,king_jouet,fnac,smyths,cultura,leclerc' || 'hikaru,king_jouet,leclerc' }}
         run: python monitor_hikaru_once.py
       # always() : même si l'étape précédente sort en erreur (un site cassé),
       # l'état des sites qui ont bien répondu doit être sauvegardé.

@@ -4,12 +4,10 @@ Vérification UNIQUE du stock / de la sortie de produits One Piece Card Game.
 
 Sites et produits surveillés :
 - Hikaru Distribution : Premium Card Collection ONE PIECE DAY'26 (Shopify, check JSON + repli HTML)
-- Hikaru Distribution : tout le catalogue One Piece en français et anglais/US, pour être
-                         alerté aussi bien d'un retour en stock que de la mise en ligne
-                         d'une nouvelle référence (le Double Pack OP17 FR n'ayant pas
-                         encore de fiche produit). Les éditions japonaises, chinoises et
-                         coréennes sont écartées — sauf le ONE PIECE DAY'26 ci-dessus,
-                         suivi explicitement car il n'existe qu'en japonais.
+                         C'est le SEUL produit suivi chez Hikaru : le reste de leur
+                         catalogue TCG est jugé trop cher. La surveillance complète du
+                         catalogue reste codée et se réactive via MONITOR_SITES
+                         (clé "hikaru_one_piece"), voir le commentaire dans SITES.
 - King Jouet          : Double Pack OP17 "Les Guerriers les plus puissants au monde",
                          via les données structurées schema.org de la fiche (la page est
                          rendue en JavaScript, le texte visible ne dit rien du stock)
@@ -81,14 +79,18 @@ SITES = {
             "premium-card-collection-one-piece-card-game-one-piece-day-26-edition-limitee-japonais"
         ),
     },
+    # DÉSACTIVÉ : le reste du catalogue Hikaru est jugé trop cher, seule la promo
+    # ONE PIECE DAY'26 ci-dessus y est suivie. La configuration est conservée
+    # telle quelle — il suffit de rajouter "hikaru_one_piece" à MONITOR_SITES
+    # dans le workflow pour la réactiver. Son entrée a été retirée de l'état, la
+    # réactivation repartira donc d'une photo neuve, sans salve de rattrapage.
     "hikaru_one_piece": {
         "label": "Hikaru Distribution",
         "product_name": "One Piece Card Game",
-        # Surveillance de TOUT le catalogue One Piece en français et en anglais/US
-        # (le Double Pack OP17 FR n'a pas encore de fiche produit : on ne peut pas
-        # se contenter d'URL fixes). Le moteur de recherche Shopify plafonnant à
-        # 10 résultats, on balaie products.json page par page en requêtes
-        # conditionnelles : voir scan_shopify_catalog.
+        # Surveillance de TOUT le catalogue One Piece en français et en anglais/US.
+        # Le moteur de recherche Shopify plafonnant à 10 résultats, on balaie
+        # products.json page par page en requêtes conditionnelles : voir
+        # scan_shopify_catalog.
         "mode": "shopify_catalog",
         "products_url": "https://hikarudistribution.com/products.json",
         "base_url": "https://hikarudistribution.com",
