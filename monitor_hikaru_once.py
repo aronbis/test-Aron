@@ -1145,6 +1145,115 @@ def selected_sites() -> dict:
     return {k: SITES[k] for k in voulus if k in SITES}
 
 
+def collect_available(sites: dict):
+    """
+    Inventaire ponctuel : tout le One Piece TCG commandable à cet instant.
+
+    Retourne (trouvés, non_vérifiables) où chaque trouvé est un dict
+    {label, title, url, cart_url, status}. Les sites dont on ne peut pas établir
+    le stock (bloqués, ou fiche rendue en JavaScript) sont listés à part : mieux
+    vaut dire qu'on ne sait pas que laisser croire à un inventaire exhaustif.
+    """
+    trouves, inconnus = [], []
+
+    for site_key, site_info in sites.items():
+        label = site_info["label"]
+        mode = site_info["mode"]
+        print(f"--- Inventaire : {label} ({site_key}) ---")
+
+        if mode == "shopify":
+            available, variant_id = check_stock(site_info["product_url"])
+            if available is None:
+                inconnus.append(f"{label} — vérification impossible")
+            elif available:
+                cart, _ = build_cart_urls(site_info["product_url"], variant_id)
+                trouves.append({"label": label, "title": site_info["product_name"],
+                                "url": site_info["product_url"], "cart_url": cart,
+                                "status": "in_stock"})
+
+        elif mode == "shopify_catalog":
+            produits, _, _, _ = scan_shopify_catalog(site_info, {}, 0)
+            if produits is None:
+                inconnus.append(f"{label} — balayage du catalogue impossible")
+                continue
+            for produit in produits.values():
+                if produit["available"]:
+                    cart, _ = build_cart_urls(produit["url"], produit["variant_id"])
+                    trouves.append({"label": label, "title": produit["title"],
+                                    "url": produit["url"], "cart_url": cart,
+                                    "status": "in_stock"})
+
+        elif mode == "jsonld":
+            status = check_stock_via_jsonld(site_info["product_url"])
+            if status is None:
+                inconnus.append(f"{label} — vérification impossible")
+            elif status in BUYABLE_STATUSES:
+                trouves.append({"label": label, "title": site_info["product_name"],
+                                "url": site_info["product_url"], "cart_url": None,
+                                "status": status})
+
+        elif mode == "listing":
+            produits = list_category_products(site_info)
+            if produits is None:
+                inconnus.append(f"{label} — listing inaccessible")
+                continue
+            if not site_info.get("check_new_status"):
+                inconnus.append(f"{label} — {len(produits)} références listées, "
+                                "mais le stock n'est pas lisible (fiches en JavaScript)")
+                continue
+            for produit in produits.values():
+                status = check_stock_via_jsonld(produit["url"])
+                if status in BUYABLE_STATUSES:
+                    trouves.append({"label": label, "title": produit["title"],
+                                    "url": produit["url"], "cart_url": None,
+                                    "status": status})
+
+        else:  # category : Fnac, Smyths
+            inconnus.append(f"{label} — bloqué par sa protection anti-bot")
+
+    return trouves, inconnus
+
+
+def format_report(trouves: list, inconnus: list) -> list:
+    """Met l'inventaire en messages Discord de moins de 2000 caractères."""
+    lignes = [f"{mention_prefix()}📋 **Inventaire One Piece TCG — "
+              f"{len(trouves)} produit(s) commandable(s)**"]
+    for item in sorted(trouves, key=lambda x: (x["label"], x["title"])):
+        etiquette = "🚨 en stock" if item["status"] == "in_stock" else "📦 précommande"
+        lignes.append(f"\n**{item['title'][:90]}**\n{etiquette} — {item['label']}\n{item['url']}")
+        if item["cart_url"]:
+            lignes.append(f"🛒 Panier en 1 clic : {item['cart_url']}")
+    if not trouves:
+        lignes.append("\nAucun produit commandable pour l'instant.")
+    if inconnus:
+        lignes.append("\n⚠️ **Non vérifiable :**")
+        lignes.extend(f"• {raison}" for raison in inconnus)
+
+    messages, courant = [], ""
+    for ligne in lignes:
+        if len(courant) + len(ligne) + 1 > 1900:
+            messages.append(courant)
+            courant = ligne
+        else:
+            courant = f"{courant}\n{ligne}" if courant else ligne
+    if courant:
+        messages.append(courant)
+    return messages
+
+
+def run_report(webhook_url: str, sites: dict) -> int:
+    trouves, inconnus = collect_available(sites)
+    messages = format_report(trouves, inconnus)
+    print(f"\n{len(trouves)} produit(s) commandable(s), "
+          f"{len(inconnus)} site(s) non vérifiable(s), {len(messages)} message(s).")
+    for numero, message in enumerate(messages, 1):
+        if not post_discord(webhook_url, message):
+            print(f"[!] Envoi du message {numero}/{len(messages)} échoué.")
+            return 1
+        print(f"Message {numero}/{len(messages)} envoyé.")
+    return 0
+
+
 def main() -> int:
     webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook_url:
@@ -1158,6 +1267,11 @@ def main() -> int:
     if not sites:
         print("ERREUR : MONITOR_SITES ne correspond à aucun site connu.")
         return 1
+
+    # Inventaire à la demande : envoie la liste de tout ce qui est commandable
+    # maintenant, sans rien changer à l'état ni au suivi des alertes.
+    if os.environ.get("REPORT", "").strip().lower() == "true":
+        return run_report(webhook_url, sites)
 
     state = load_state()
 

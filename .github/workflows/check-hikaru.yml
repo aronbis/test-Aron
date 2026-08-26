@@ -10,6 +10,11 @@ on:
         required: false
         type: boolean
         default: false
+      report:
+        description: "Envoyer l'inventaire Discord de tout le One Piece TCG commandable maintenant"
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: write  # nécessaire pour committer state_stock.json
 # cron-job.org peut déclencher un run alors que le précédent tourne encore :
@@ -36,10 +41,13 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
+          REPORT: ${{ github.event.inputs.report }}
           # Cultura, Fnac et Smyths refusent les IP des runners GitHub : les
           # interroger d'ici ne produit que des "indéterminé". Cultura est repris
           # par la tâche launchd du Mac (voir local/README.md).
-          MONITOR_SITES: hikaru,hikaru_one_piece,king_jouet,leclerc
+          # L'inventaire à la demande, lui, les interroge quand même : il doit
+          # dire explicitement quelles boutiques n'ont pas pu être vérifiées.
+          MONITOR_SITES: ${{ github.event.inputs.report == 'true' && '' || 'hikaru,hikaru_one_piece,king_jouet,leclerc' }}
         run: python monitor_hikaru_once.py
       # always() : même si l'étape précédente sort en erreur (un site cassé),
       # l'état des sites qui ont bien répondu doit être sauvegardé.
