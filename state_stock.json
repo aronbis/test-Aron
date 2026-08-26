@@ -2,6 +2,12 @@
   "hikaru": {
     "available": false
   },
+  "hikaru_double_pack": {
+    "products": {
+      "double-pack-set-one-piece-card-game-vol-8-dp-08-francais": false,
+      "double-pack-set-vol-9-one-piece-card-game-dp-09-francais": false
+    }
+  },
   "king_jouet": {
     "available": false
   }
