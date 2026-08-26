@@ -2,13 +2,76 @@
   "hikaru": {
     "available": false
   },
-  "hikaru_double_pack": {
+  "hikaru_one_piece": {
+    "etags": {
+      "1": "W/\"page_cache:79833137485:ProductListController:f6617f2a445040b14661cc82b47d4ffc\"",
+      "10": "W/\"page_cache:79833137485:ProductListController:ddc22d1cdcfaf319ea20c726dded9f27\"",
+      "11": "W/\"page_cache:79833137485:ProductListController:f671689e146775e16c9b66f44796b448\"",
+      "12": "W/\"page_cache:79833137485:ProductListController:5017be413b28a57d162fe024119c7fd4\"",
+      "13": "W/\"page_cache:79833137485:ProductListController:d79a649b5aae0e4441c803f3f27e98ee\"",
+      "14": "W/\"page_cache:79833137485:ProductListController:be2011e081cd888a8c847abe516d0c3f\"",
+      "15": "W/\"page_cache:79833137485:ProductListController:e74a980f538203c3d52b8dbd29dcb9c6\"",
+      "16": "W/\"page_cache:79833137485:ProductListController:8a8c18abb04e32562f474fac287fe96b\"",
+      "17": "W/\"page_cache:79833137485:ProductListController:1e41747d10d10bf976026200f7647b98\"",
+      "2": "W/\"page_cache:79833137485:ProductListController:bc8d4048bd3441d00dc69158697f5da6\"",
+      "3": "W/\"page_cache:79833137485:ProductListController:945b3cfb70d49c2ac35a3079bd177a00\"",
+      "4": "W/\"page_cache:79833137485:ProductListController:69f438422b668488d9d089054e0694f4\"",
+      "5": "W/\"page_cache:79833137485:ProductListController:fc093277127182bd112ffcbeb6ee40a7\"",
+      "6": "W/\"page_cache:79833137485:ProductListController:1c5d1966b39ef27a3b51754ea05c1a60\"",
+      "7": "W/\"page_cache:79833137485:ProductListController:a53cf2b1675808377313828ab9902398\"",
+      "8": "W/\"page_cache:79833137485:ProductListController:98794a068a68250bda1aea71fc61f56f\"",
+      "9": "W/\"page_cache:79833137485:ProductListController:bbcfd6995f3c6c32f067b9eac237beb9\""
+    },
     "products": {
+      "booster-one-piece-card-game-des-poings-vifs-comme-leclair-op-11-francais": false,
+      "booster-one-piece-card-game-les-nouveaux-empereurs-op-09-francais": false,
+      "booster-one-piece-card-game-les-sept-de-la-mer-dazur-op14-eb04-francais": false,
+      "booster-one-piece-card-game-sang-royal-op-10-francais": false,
+      "booster-one-piece-card-game-successeurs-op-13-francais": false,
+      "carte-one-piece-luffy-natsucomi-2026": true,
+      "carte-promo-one-piece-card-game-o-opday24": false,
+      "deck-de-demarrage-one-piece-card-game-ace-et-newgate-st-22-francais": false,
+      "deck-de-demarrage-one-piece-card-game-charlotte-katakuri-st-20-francais": false,
+      "deck-de-demarrage-one-piece-card-game-don-quijote-doflamingo-st-17-francais": false,
+      "deck-de-demarrage-one-piece-card-game-edward-newgate-st-15-francais": false,
+      "deck-de-demarrage-one-piece-card-game-egg-head-st-29-francais": false,
+      "deck-de-demarrage-one-piece-card-game-ex-gear-5th-st-21-francais": false,
+      "deck-de-demarrage-one-piece-card-game-jewelry-bonney-st-24-francais": false,
+      "deck-de-demarrage-one-piece-card-game-marshall-d-teach-st-27-francais": false,
+      "deck-de-demarrage-one-piece-card-game-monkey-d-luffy-st-18-francais": false,
+      "deck-de-demarrage-one-piece-card-game-monkey-d-luffy-st-25-francais": false,
+      "deck-de-demarrage-one-piece-card-game-monkey-d-luffy-st-26-francais": false,
+      "deck-de-demarrage-one-piece-card-game-shanks-st-23-francais": false,
+      "deck-de-demarrage-one-piece-card-game-smoker-st-19-francais": false,
+      "deck-de-demarrage-one-piece-card-game-uta-st-16-francais": false,
+      "deck-de-demarrage-one-piece-card-game-yamato-st-28-francais": false,
+      "display-24-boosters-one-piece-card-game-anime-25th-collection-eb-02-francais": false,
+      "display-24-boosters-one-piece-card-game-des-poings-vifs-comme-leclair-op-11-francais": false,
+      "display-24-boosters-one-piece-card-game-heroines-edition-eb-03-francais": false,
+      "display-24-boosters-one-piece-card-game-les-sept-de-la-mer-dazur-op14-eb04-francais": false,
+      "display-24-boosters-one-piece-card-game-successeurs-op-13-francais": false,
+      "display-booster-one-piece-card-game-sang-royal-op-10-francais-24-boosters": false,
+      "display-booster-one-piece-card-game-the-best-prb-01-francais": false,
+      "display-booster-one-piece-card-game-the-best-vol-2-prb-02-francais": false,
+      "display-one-piece-card-game-les-nouveaux-empereurs-op-09-francais": false,
       "double-pack-set-one-piece-card-game-vol-8-dp-08-francais": false,
-      "double-pack-set-vol-9-one-piece-card-game-dp-09-francais": false
+      "double-pack-set-vol-9-one-piece-card-game-dp-09-francais": false,
+      "lot-de-decks-one-piece-card-game-apprenez-ensemble-ld-01-francais": false,
+      "luffy-one-piece-magazine-vol-21-st29-001": false,
+      "one-piece-25eme-anniversaire-carte-premium-collection": false,
+      "one-piece-base-shop-vol-1-edition-limitee": true,
+      "one-piece-card-game-mini-tin-vol-3-op-13-ts-03-asia-exclusive": false,
+      "one-piece-card-game-premium-booster-the-best-prb-01-francais": false,
+      "one-piece-card-game-the-best-vol-2-prb-02-francais": false,
+      "one-piece-devil-fruits-collection-vol-3-df-03": false,
+      "one-piece-saikyo-jump-2026-one-piece-promo": false,
+      "one-piece-set-exclusif-v-jump-luffy-zoro-sanji-2026-one-piece-promo": true,
+      "promo-weekly-shonen-jump-p-159-luffy-29th-anniversary-one-piece-card-game": true,
+      "round1-one-piece-card-game": true,
+      "tin-pack-set-vol-1-one-piece-card-game-ts-01-francais": false
     }
   },
   "king_jouet": {
-    "available": false
+    "status": "out_of_stock"
   }
 }
