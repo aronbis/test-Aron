@@ -1,0 +1,21 @@
+name: Test navigateur (Fnac / Smyths)
+# Expérience jetable, déclenchée à la main : vérifie si un navigateur headless
+# franchit les protections anti-bot depuis une IP GitHub Actions.
+# À supprimer, avec probe_browser.py, une fois la réponse obtenue.
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+      - name: Sonder Fnac et Smyths
+        run: python probe_browser.py
