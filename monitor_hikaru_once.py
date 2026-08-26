@@ -13,10 +13,18 @@ Sites et produits surveillés :
 - King Jouet          : Double Pack OP17 "Les Guerriers les plus puissants au monde",
                          via les données structurées schema.org de la fiche (la page est
                          rendue en JavaScript, le texte visible ne dit rien du stock)
-- Cultura, E.Leclerc  : toute nouvelle sortie One Piece TCG apparaissant au catalogue
-- Fnac, Smyths Toys   : configurés mais INOPÉRANTS, bloqués par leur protection anti-bot
-                         (Fnac répond 403, Smyths sert une page de défi en HTTP 200).
-                         Conservés pour reprendre si le blocage tombe ; chaque run le signale.
+- E.Leclerc           : toute nouvelle sortie One Piece TCG apparaissant au catalogue
+- Cultura, Fnac, Smyths : configurés mais INOPÉRANTS depuis GitHub Actions, dont les
+                         runners sont sur des plages Azure que ces sites refusent
+                         (Cultura et Fnac répondent 403, Smyths sert une page de défi
+                         en HTTP 200). Mesuré : un vrai Chromium depuis la CI est bloqué
+                         exactement comme requests, alors que les mêmes pages se chargent
+                         sans difficulté depuis une IP résidentielle — c'est l'adresse qui
+                         est filtrée, pas l'outil. Ces sites ne redeviendraient
+                         exploitables qu'en exécutant le moniteur depuis une machine
+                         personnelle. Ils sont conservés (une requête chacun) pour
+                         reprendre automatiquement si le blocage tombe, et chaque run
+                         signale explicitement qu'ils ne sont pas surveillés.
 
 Les alertes distinguent le stock immédiat de l'ouverture des précommandes : sur ces
 enseignes, la précommande est souvent la seule vraie fenêtre d'achat.
@@ -126,8 +134,9 @@ SITES = {
     "cultura": {
         "label": "Cultura",
         "product_name": "One Piece Card Game",
-        # Seul site non-Shopify réellement exploitable : la page catégorie liste
-        # les fiches en clair. On y guette toute nouvelle sortie One Piece TCG.
+        # La page catégorie liste les fiches en clair et le code fonctionne, mais
+        # Cultura répond 403 aux IP GitHub Actions : inopérant en production, OK
+        # si le moniteur tourne un jour depuis une machine personnelle.
         "mode": "listing",
         "category_url": "https://www.cultura.com/cartes-a-jouer/cartes-one-piece.html",
         "base_url": "https://www.cultura.com",
@@ -785,7 +794,7 @@ def fetch_catalog_page(products_url: str, page: int, etag):
     return "ok", products, resp.headers.get("ETag", "")
 
 
-def scan_shopify_catalog(site_info: dict, etags: dict):
+def scan_shopify_catalog(site_info: dict, etags: dict, known_pages: int = 0):
     """
     Balaie tout le catalogue Shopify et retourne les produits One Piece FR/US.
 
@@ -795,17 +804,24 @@ def scan_shopify_catalog(site_info: dict, etags: dict):
     sans corps, ce qui rend un balayage complet quasi gratuit alors qu'un
     téléchargement intégral pèse ~12 Mo.
 
-    Retourne (produits, nouveaux_etags, complet) :
+    `known_pages` est le rang de la première page vide observée au run précédent.
+    Sans lui, la page terminale répondant 304 comme les autres, on ne saurait pas
+    où s'arrêter : le balayage avançait d'une page à chaque run et accumulait un
+    ETag de plus, ce qui provoquait aussi un commit d'état à chaque exécution.
+
+    Retourne (produits, nouveaux_etags, complet, pages) :
       - produits : dict handle -> {title, url, available, variant_id}, limité aux
         pages réellement téléchargées ; l'appelant fusionne avec l'état connu
       - complet  : True si toutes les pages ont été relues (aucun 304), auquel cas
         l'appelant peut remplacer l'état au lieu de le fusionner
-    Retourne (None, etags, False) si le balayage a échoué.
+      - pages    : rang de la première page vide, à repasser au run suivant
+    Retourne (None, etags, False, known_pages) si le balayage a échoué.
     """
     base_url = site_info["base_url"].rstrip("/")
     products = {}
     new_etags = {}
     complete = True
+    pages = known_pages
 
     for page in range(1, CATALOG_MAX_PAGES + 1):
         key = str(page)
@@ -814,15 +830,18 @@ def scan_shopify_catalog(site_info: dict, etags: dict):
         if status == "error":
             # Une page manquante fausserait la comparaison (produits vus comme
             # disparus) : on abandonne le run plutôt que d'alerter à tort.
-            return None, etags, False
+            return None, etags, False, known_pages
 
         if status == "unchanged":
             complete = False
             new_etags[key] = etags.get(key)
+            if known_pages and page >= known_pages:
+                break  # la page terminale n'a pas bougé : fin du catalogue
             continue
 
         new_etags[key] = etag
         if not raw:
+            pages = page
             break  # page vide : fin du catalogue
 
         for product in raw:
@@ -840,7 +859,7 @@ def scan_shopify_catalog(site_info: dict, etags: dict):
                 "variant_id": first_available_variant_id(variants),
             }
 
-    return products, new_etags, complete
+    return products, new_etags, complete, pages
 
 
 # --- Traitement d'un site -----------------------------------------------------
@@ -996,8 +1015,16 @@ def process_catalog_site(site_key: str, site_info: dict, state: dict, webhook_ur
     site_state = state.get(site_key, {})
     known = site_state.get("products", {})
     etags = site_state.get("etags", {})
+    known_pages = site_state.get("pages", 0)
 
-    products, new_etags, complete = scan_shopify_catalog(site_info, etags)
+    # États écrits avant l'introduction de "pages" : ils contiennent des ETags de
+    # pages vides accumulés run après run. On repart d'un balayage complet une
+    # fois, pour ne pas figer une pagination trop longue.
+    if etags and not known_pages:
+        print("[i] État de pagination absent (ancien format) : balayage complet de remise à plat.")
+        etags = {}
+
+    products, new_etags, complete, pages = scan_shopify_catalog(site_info, etags, known_pages)
 
     if products is None:
         print(f"Balayage incomplet pour {label}, état conservé.")
@@ -1007,8 +1034,8 @@ def process_catalog_site(site_key: str, site_info: dict, state: dict, webhook_ur
         print(f"Statut {label} : aucune page modifiée depuis le dernier run.")
         # Les ETags peuvent quand même avoir bougé (page ajoutée en fin de
         # catalogue) : on les enregistre pour ne pas retélécharger inutilement.
-        if new_etags != etags:
-            state[site_key] = {"products": known, "etags": new_etags}
+        if new_etags != etags or pages != known_pages:
+            state[site_key] = {"products": known, "etags": new_etags, "pages": pages}
             return True
         return False
 
@@ -1058,8 +1085,8 @@ def process_catalog_site(site_key: str, site_info: dict, state: dict, webhook_ur
             new_known[handle] = available
             changed = True
 
-    if changed or new_etags != etags:
-        state[site_key] = {"products": new_known, "etags": new_etags}
+    if changed or new_etags != etags or pages != known_pages:
+        state[site_key] = {"products": new_known, "etags": new_etags, "pages": pages}
         return True
     return False
 
