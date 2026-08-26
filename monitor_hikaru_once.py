@@ -10,10 +10,16 @@ Sites et produits surveillés :
                          encore de fiche produit). Les éditions japonaises, chinoises et
                          coréennes sont écartées — sauf le ONE PIECE DAY'26 ci-dessus,
                          suivi explicitement car il n'existe qu'en japonais.
-- King Jouet          : Double Pack OP17 "Les Guerriers les plus puissants au monde"
-                         (URL produit déjà existante mais actuellement en 404/410, check HTML direct)
-- Fnac, Smyths Toys, Cultura : Double Pack OP17 (pas encore de fiche produit -> détection
-                         d'apparition d'un lien correspondant sur la page catégorie One Piece)
+- King Jouet          : Double Pack OP17 "Les Guerriers les plus puissants au monde",
+                         via les données structurées schema.org de la fiche (la page est
+                         rendue en JavaScript, le texte visible ne dit rien du stock)
+- Cultura, E.Leclerc  : toute nouvelle sortie One Piece TCG apparaissant au catalogue
+- Fnac, Smyths Toys   : configurés mais INOPÉRANTS, bloqués par leur protection anti-bot
+                         (Fnac répond 403, Smyths sert une page de défi en HTTP 200).
+                         Conservés pour reprendre si le blocage tombe ; chaque run le signale.
+
+Les alertes distinguent le stock immédiat de l'ouverture des précommandes : sur ces
+enseignes, la précommande est souvent la seule vraie fenêtre d'achat.
 
 Conçu pour tourner dans GitHub Actions, déclenché à chaque appel par
 cron-job.org via l'API workflow_dispatch. Ne boucle PAS : une exécution
@@ -125,6 +131,27 @@ SITES = {
         "mode": "listing",
         "category_url": "https://www.cultura.com/cartes-a-jouer/cartes-one-piece.html",
         "base_url": "https://www.cultura.com",
+        "product_pattern": r"/p-[a-z0-9\-]+?-(\d+)\.html",
+        # Rayon déjà dédié aux cartes One Piece : pas besoin du filtre TCG, qui
+        # écarterait des références légitimes. La fiche expose du JSON-LD.
+        "tcg_filter": False,
+        "check_new_status": True,
+    },
+    "leclerc": {
+        "label": "E.Leclerc",
+        "product_name": "One Piece Card Game",
+        # Seule enseigne de grande distribution qui vende réellement du One Piece
+        # TCG et reste accessible au script. Carrefour et Rakuten répondent 403,
+        # Cdiscount et Micromania ne servent qu'une coquille JavaScript, et Auchan
+        # ne référence que des LEGO et des figurines One Piece — aucun jeu de cartes.
+        # La page de résultats liste les produits côté serveur, mais les fiches sont
+        # rendues en JavaScript : détection des nouveautés seulement, pas de stock.
+        "mode": "listing",
+        "category_url": "https://www.e.leclerc/recherche?q=one%20piece%20carte",
+        "base_url": "https://www.e.leclerc",
+        "product_pattern": r"/fp/[a-z0-9\-]+?-(\d{8,14})",
+        "tcg_filter": True,
+        "check_new_status": False,
     },
 }
 
@@ -156,15 +183,19 @@ UNAVAILABLE_MARKERS = [
 AVAILABLE_MARKERS = ["ajouter au panier", "ajouter à mon panier"]
 
 # Formulations typiques des pages de défi anti-bot (Akamai, Imperva, Cloudflare).
+# Volontairement spécifiques : un marqueur trop large ferait passer un site qui
+# fonctionne pour un site bloqué, et on cesserait de le surveiller sans le voir.
+# "captcha" seul est proscrit — E.Leclerc expose une config reCAPTCHA légitime
+# dans le JSON de ses pages de résultats.
 BOT_CHALLENGE_MARKERS = (
     "pardon our interruption",
     "_incapsula_",
     "incapsula incident",
-    "access denied",
     "are you a robot",
     "verifying you are human",
     "enable javascript and cookies",
-    "captcha",
+    "checking your browser before",
+    "attention required! | cloudflare",
 )
 
 # schema.org/availability -> statut interne. Les fiches JSON-LD sont bien plus
@@ -413,6 +444,24 @@ def fetch_shopify_variants(product_url: str):
     return variants
 
 
+def decode_html(resp) -> str:
+    """
+    Texte de la réponse, en corrigeant le charset.
+
+    Quand l'en-tête Content-Type ne précise pas de charset, requests retombe sur
+    ISO-8859-1 comme le veut la RFC. E.Leclerc est dans ce cas alors que ses pages
+    sont en UTF-8 : sans ça, "Héritage du Maître" arrive en "HÃ©ritage du MaÃ®tre"
+    jusque dans les alertes Discord.
+
+    On force UTF-8 sans passer par resp.apparent_encoding : la détection
+    automatique analyse tout le corps, ce qui prend plusieurs dizaines de
+    secondes sur les pages de 1 Mo de Cultura et d'E.Leclerc.
+    """
+    if "charset" not in resp.headers.get("Content-Type", "").lower():
+        resp.encoding = "utf-8"
+    return resp.text
+
+
 def looks_like_bot_challenge(resp) -> bool:
     """
     Détecte les pages de protection anti-bot.
@@ -511,7 +560,7 @@ def check_stock_via_jsonld(product_url: str):
         print(f"[!] Statut HTTP inattendu : {resp.status_code}")
         return None
 
-    status, name, price = extract_jsonld_product(resp.text)
+    status, name, price = extract_jsonld_product(decode_html(resp))
     if status:
         detail = f" ({price} €)" if price else ""
         print(f"[i] JSON-LD : {name[:55]}{detail}")
@@ -539,7 +588,7 @@ def check_stock_via_html(product_url: str):
         print(f"[!] Statut HTTP inattendu sur le HTML : {resp.status_code}")
         return None
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(decode_html(resp), "html.parser")
     page_text = soup.get_text(separator=" ").lower()
 
     has_unavailable = any(marker in page_text for marker in UNAVAILABLE_MARKERS)
@@ -595,7 +644,7 @@ def check_category_link(category_url: str, base_url: str):
         print(f"[!] Statut HTTP inattendu sur la page catégorie : {resp.status_code}")
         return None
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(decode_html(resp), "html.parser")
 
     for link in soup.find_all("a", href=True):
         text = link.get_text(" ", strip=True)
@@ -610,25 +659,68 @@ def check_category_link(category_url: str, base_url: str):
     return False
 
 
-CULTURA_PRODUCT_PATTERN = re.compile(r"/p-[a-z0-9\-]+?-(\d+)\.html", re.IGNORECASE)
-# Les vignettes du listing sont préfixées par un badge ("Nouveauté", "Précommande",
+# Les vignettes de listing sont préfixées par un badge ("Nouveauté", "Précommande",
 # "Meilleure vente") collé au titre : on le retire pour garder un nom lisible.
 LISTING_BADGE_PATTERN = re.compile(
     r"^(nouveaut[ée]|pr[ée]commande|meilleure vente|promo|exclusivit[ée])\s*", re.IGNORECASE
 )
 
+# Sur une page de résultats généraliste (E.Leclerc), "One Piece" ramène surtout
+# des LEGO, figurines et mangas. On exige un marqueur propre au jeu de cartes.
+TCG_PATTERN = re.compile(
+    r"\b(op|st|eb|dp|prb)[\s\-]?\d{1,2}\b|starter deck|booster|display|"
+    r"devil fruit collection|card game|premium card|double pack|"
+    r"jeu de cartes à collectionner",
+    re.IGNORECASE,
+)
+# Produits dérivés qui contiennent malgré tout un mot-clé du jeu de cartes
+# (« Vivre Card » est un databook, « jeu de 54 cartes » un jeu classique).
+NOT_TCG_PATTERN = re.compile(
+    r"lego|figurine|peluche|puzzle|t-shirt|tote bag|mug|postale|broch[ée]|"
+    r"dvd|blu-ray|manga|vivre card|54 cartes|roman|porte-cl",
+    re.IGNORECASE,
+)
+
+
+def is_tcg_product(title: str) -> bool:
+    return bool(TCG_PATTERN.search(title)) and not NOT_TCG_PATTERN.search(title)
+
+
+# Le texte d'une vignette agrège titre, marque, disponibilité et nombre d'avis :
+# "Booster One Piece - OP09 - Asmodee Asmodee (4) INDISPONIBLE EN LIGNE en stock
+# à indisponible à 5,99 €". On coupe à la première mention de vendeur ou de
+# disponibilité pour que l'alerte Discord reste lisible.
+LISTING_NOISE_PATTERN = re.compile(
+    r"\s*(?:indisponible en ligne|disponible en ligne|en stock|vendeur partenaire|"
+    r"vendeur par|vendu et exp[ée]di[ée]|vendu par)\b.*$",
+    re.IGNORECASE,
+)
+REPEATED_WORD_PATTERN = re.compile(r"\b(\w+)( \1\b)+", re.IGNORECASE)
+
+
+def clean_listing_title(raw: str) -> str:
+    title = LISTING_BADGE_PATTERN.sub("", re.sub(r"\s+", " ", raw).strip())
+    title = LISTING_NOISE_PATTERN.sub("", title)
+    title = REPEATED_WORD_PATTERN.sub(r"\1", title)       # "Asmodee Asmodee"
+    title = re.sub(r"\s*\(\d+\)\s*$", "", title)          # nombre d'avis en fin
+    return re.sub(r"[\s\-–—:]+$", "", title).strip()
+
 
 def list_category_products(site_info: dict):
     """
-    Liste les produits d'une page catégorie (Cultura), pour repérer toute
+    Liste les produits d'une page catégorie ou de résultats, pour repérer toute
     nouvelle sortie One Piece TCG dès son apparition au catalogue.
+
+    Le motif d'URL des fiches est propre à chaque site et vient de sa config
+    ("product_pattern", dont le premier groupe capture l'identifiant produit).
 
     Retourne un dict id -> {title, url}, ou None si la page n'a pas pu être lue.
     """
-    category_url = site_info["category_url"]
     base_url = site_info["base_url"].rstrip("/")
+    pattern = re.compile(site_info["product_pattern"], re.IGNORECASE)
+    tcg_only = site_info.get("tcg_filter", False)
     try:
-        resp = SESSION.get(category_url, timeout=TIMEOUT)
+        resp = SESSION.get(site_info["category_url"], timeout=TIMEOUT)
     except requests.RequestException as e:
         print(f"[!] Erreur réseau (listing catégorie) : {e}")
         return None
@@ -641,22 +733,22 @@ def list_category_products(site_info: dict):
         print(f"[!] Statut HTTP inattendu sur le listing : {resp.status_code}")
         return None
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(decode_html(resp), "html.parser")
     products = {}
     for link in soup.find_all("a", href=True):
-        match = CULTURA_PRODUCT_PATTERN.search(link["href"])
+        match = pattern.search(link["href"])
         if not match:
             continue
-        title = LISTING_BADGE_PATTERN.sub("", link.get_text(" ", strip=True))
+        title = clean_listing_title(link.get_text(" ", strip=True))
         if not title or not ONEPIECE_PATTERN.search(title):
             continue
-        if is_excluded_language(title):
+        if is_excluded_language(title) or (tcg_only and not is_tcg_product(title)):
             continue
         href = link["href"]
-        products[match.group(1)] = {
+        products.setdefault(match.group(1), {
             "title": title[:120],
             "url": href if href.startswith("http") else f"{base_url}/{href.lstrip('/')}",
-        }
+        })
     return products
 
 
@@ -874,8 +966,9 @@ def process_listing_site(site_key: str, site_info: dict, state: dict, webhook_ur
             continue
         print(f">>> Nouvelle sortie sur {label} : {product['title'][:60]}")
         # Une seule requête supplémentaire, et seulement pour une nouveauté :
-        # le listing ne dit pas si le produit est déjà commandable.
-        status = check_stock_via_jsonld(product["url"])
+        # le listing ne dit pas si le produit est déjà commandable. Inutile chez
+        # les sites dont la fiche est rendue en JavaScript (E.Leclerc).
+        status = check_stock_via_jsonld(product["url"]) if site_info.get("check_new_status") else None
         if not send_discord_new_product(
             webhook_url, label, product["title"], product["url"], status=status
         ):
