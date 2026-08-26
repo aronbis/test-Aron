@@ -1,1 +1,8 @@
-{"hikaru": {"available": false}, "cardlab": {"available": false}, "king_jouet": {"available": false}}
+{
+  "hikaru": {
+    "available": false
+  },
+  "king_jouet": {
+    "available": false
+  }
+}
