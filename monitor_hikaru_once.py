@@ -164,7 +164,12 @@ SITES = {
     },
 }
 
-STATE_FILE = Path(__file__).resolve().parent / "state_stock.json"
+# Emplacement de l'état. Surchargeable pour l'exécution locale (launchd sur Mac),
+# afin que l'état de la machine perso n'écrase pas celui committé par la CI.
+STATE_FILE = Path(
+    os.environ.get("MONITOR_STATE_FILE")
+    or Path(__file__).resolve().parent / "state_stock.json"
+).expanduser()
 
 HEADERS = {
     "User-Agent": (
@@ -1118,6 +1123,28 @@ def run_test_alert(webhook_url: str) -> int:
     return 1
 
 
+def selected_sites() -> dict:
+    """
+    Sites à vérifier sur cette machine.
+
+    MONITOR_SITES permet de répartir la surveillance entre GitHub Actions et une
+    machine perso : Cultura et la Fnac refusent les IP des runners GitHub, mais
+    répondent depuis une connexion résidentielle. Sans ce partage, les deux
+    environnements alerteraient en double sur les sites communs.
+
+    Exemple : MONITOR_SITES="cultura,fnac"
+    """
+    demandes = os.environ.get("MONITOR_SITES", "").strip()
+    if not demandes:
+        return SITES
+    voulus = [k.strip() for k in demandes.split(",") if k.strip()]
+    inconnus = [k for k in voulus if k not in SITES]
+    if inconnus:
+        print(f"[!] MONITOR_SITES : clés inconnues ignorées {inconnus} "
+              f"(disponibles : {', '.join(SITES)})")
+    return {k: SITES[k] for k in voulus if k in SITES}
+
+
 def main() -> int:
     webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook_url:
@@ -1126,6 +1153,11 @@ def main() -> int:
 
     if os.environ.get("TEST_ALERT", "").strip().lower() == "true":
         return run_test_alert(webhook_url)
+
+    sites = selected_sites()
+    if not sites:
+        print("ERREUR : MONITOR_SITES ne correspond à aucun site connu.")
+        return 1
 
     state = load_state()
 
@@ -1138,7 +1170,7 @@ def main() -> int:
     state_changed = bool(obsolete)
 
     failures = 0
-    for site_key, site_info in SITES.items():
+    for site_key, site_info in sites.items():
         print(f"--- Vérification : {site_info['label']} ---")
         try:
             mode = site_info["mode"]
@@ -1160,7 +1192,7 @@ def main() -> int:
 
     if state_changed:
         save_state(state)
-        print("État mis à jour dans state_stock.json.")
+        print(f"État mis à jour dans {STATE_FILE}.")
     else:
         print("Pas de changement d'état.")
 

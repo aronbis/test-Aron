@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aronbis.onepiece-monitor</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/one-piece-monitor/run_monitor.sh</string>
+    </array>
+
+    <!-- Toutes les 2 minutes. launchd rattrape le tir au réveil si le Mac
+         dormait au moment prévu. -->
+    <key>StartInterval</key>
+    <integer>120</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Le script écrit lui-même dans monitor.log ; on ne garde ici que les
+         erreurs que launchd émettrait avant de l'atteindre. -->
+    <key>StandardErrorPath</key>
+    <string>__HOME__/one-piece-monitor/launchd.err</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

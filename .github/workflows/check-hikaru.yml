@@ -36,6 +36,10 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
+          # Cultura, Fnac et Smyths refusent les IP des runners GitHub : les
+          # interroger d'ici ne produit que des "indéterminé". Cultura est repris
+          # par la tâche launchd du Mac (voir local/README.md).
+          MONITOR_SITES: hikaru,hikaru_one_piece,king_jouet,leclerc
         run: python monitor_hikaru_once.py
       # always() : même si l'étape précédente sort en erreur (un site cassé),
       # l'état des sites qui ont bien répondu doit être sauvegardé.
