@@ -4,6 +4,9 @@ Vérification UNIQUE du stock / de la sortie de produits One Piece Card Game.
 
 Sites et produits surveillés :
 - Hikaru Distribution : Premium Card Collection ONE PIECE DAY'26 (Shopify, check JSON + repli HTML)
+- Hikaru Distribution : tous les Double Pack Set One Piece (via la recherche Shopify,
+                         pour être alerté aussi bien d'un retour en stock que de la mise
+                         en ligne d'une nouvelle référence comme le Double Pack OP17 FR)
 - King Jouet          : Double Pack OP17 "Les Guerriers les plus puissants au monde"
                          (URL produit déjà existante mais actuellement en 404/410, check HTML direct)
 - Fnac, Smyths Toys, Cultura : Double Pack OP17 (pas encore de fiche produit -> détection
@@ -26,6 +29,11 @@ si l'état a changé.
 Règle importante : l'état n'est mis à jour QUE si l'alerte Discord
 correspondante est bien partie. Sinon un échec d'envoi ferait passer le
 site en "déjà signalé" et l'alerte serait perdue définitivement.
+
+Sur les boutiques Shopify, l'alerte contient un "cart permalink" qui ajoute
+directement la variante en stock au panier : un clic depuis Discord et le
+panier est déjà rempli, ce qui fait gagner les quelques secondes qui comptent
+un jour de drop.
 """
 
 import json
@@ -34,6 +42,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -51,6 +60,19 @@ SITES = {
             "https://hikarudistribution.com/products/"
             "premium-card-collection-one-piece-card-game-one-piece-day-26-edition-limitee-japonais"
         ),
+    },
+    "hikaru_double_pack": {
+        "label": "Hikaru Distribution",
+        "product_name": "Double Pack Set One Piece Card Game",
+        # Pas de fiche produit fixe : le Double Pack OP17 français n'existe pas
+        # encore sur la boutique. On interroge le moteur de recherche Shopify à
+        # chaque run pour suivre TOUS les double packs One Piece : on est donc
+        # alerté aussi bien d'un retour en stock que de l'apparition d'une
+        # nouvelle référence (l'OP17 le jour où elle sera mise en ligne).
+        "mode": "shopify_search",
+        "search_url": "https://hikarudistribution.com/search/suggest.json",
+        "search_query": "double pack one piece",
+        "base_url": "https://hikarudistribution.com",
     },
     "king_jouet": {
         "label": "King Jouet",
@@ -117,6 +139,15 @@ AVAILABLE_MARKERS = ["ajouter au panier", "ajouter à mon panier"]
 # Pour la détection d'apparition sur les pages catégorie (Fnac, Smyths, Cultura)
 OP17_PATTERN = re.compile(r"op[\s\-]?17\b", re.IGNORECASE)
 DOUBLEPACK_PATTERN = re.compile(r"double|duo", re.IGNORECASE)
+
+# Pour filtrer les résultats de la recherche Shopify (Hikaru) : on ne garde que
+# les double packs One Piece, la recherche renvoyant aussi des produits Pokémon
+# dont le titre contient "Double".
+ONEPIECE_PATTERN = re.compile(r"one[\s\-]?piece", re.IGNORECASE)
+SHOPIFY_SEARCH_LIMIT = 10
+
+# Quantité pré-remplie dans les liens "ajouter au panier" envoyés sur Discord.
+CART_QTY = 1
 
 
 # --- Session HTTP ------------------------------------------------------------
@@ -219,18 +250,60 @@ def post_discord(webhook_url: str, content: str, attempts: int = 3) -> bool:
     return False
 
 
-def send_discord_alert(webhook_url: str, site_label: str, product_name: str, product_url: str) -> bool:
+def build_cart_urls(product_url: str, variant_id) -> tuple:
+    """
+    Construit les "cart permalinks" Shopify pour une variante précise.
+
+    - .../cart/<variant>:<qty>?storefront=true -> ajoute au panier et reste sur
+      la boutique (le panier est déjà rempli en un clic depuis Discord)
+    - .../cart/<variant>:<qty>                 -> saute directement au checkout
+
+    Retourne (None, None) si on n'a pas d'identifiant de variante (repli HTML,
+    site non Shopify) : l'alerte se contentera alors du lien produit.
+    """
+    if not variant_id:
+        return None, None
+    parts = urlsplit(product_url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    return (
+        f"{origin}/cart/{variant_id}:{CART_QTY}?storefront=true",
+        f"{origin}/cart/{variant_id}:{CART_QTY}",
+    )
+
+
+def send_discord_alert(
+    webhook_url: str,
+    site_label: str,
+    product_name: str,
+    product_url: str,
+    variant_id=None,
+) -> bool:
+    lines = [
+        f"{mention_prefix()}🚨 **EN STOCK !**",
+        f"{product_name} vient de passer disponible sur **{site_label}** !",
+        f"Fiche produit : {product_url}",
+    ]
+    cart_url, checkout_url = build_cart_urls(product_url, variant_id)
+    if cart_url:
+        lines.append(f"🛒 **Ajouter au panier en 1 clic** : {cart_url}")
+        lines.append(f"⚡ Commander tout de suite : {checkout_url}")
+    return post_discord(webhook_url, "\n".join(lines))
+
+
+def send_discord_new_product(webhook_url: str, site_label: str, title: str, product_url: str) -> bool:
+    """Alerte d'apparition : une référence qu'on n'avait jamais vue est mise en ligne."""
     return post_discord(
         webhook_url,
-        f"{mention_prefix()}🚨 **EN STOCK !**\n"
-        f"{product_name} vient de passer disponible sur **{site_label}** !\n"
-        f"Lien direct : {product_url}",
+        f"{mention_prefix()}👀 **Nouvelle référence en ligne !**\n"
+        f"« {title} » vient d'apparaître sur **{site_label}** (pas encore en stock).\n"
+        f"Fiche produit : {product_url}",
     )
 
 
 # --- Détection de stock (sites Shopify + URL directe) -------------------------
 
-def check_stock_via_json(product_url: str):
+def fetch_shopify_variants(product_url: str):
+    """Retourne la liste des variantes d'un produit Shopify, ou None si indéterminé."""
     json_url = product_url + ".json"
     try:
         resp = SESSION.get(json_url, timeout=TIMEOUT)
@@ -253,6 +326,21 @@ def check_stock_via_json(product_url: str):
         print("[!] Aucune variante trouvée dans le JSON.")
         return None
 
+    return variants
+
+
+def first_available_variant_id(variants):
+    """Identifiant de la première variante en stock, pour le lien panier."""
+    for variant in variants or []:
+        if variant.get("available") is True:
+            return variant.get("id")
+    return None
+
+
+def check_stock_via_json(product_url: str):
+    variants = fetch_shopify_variants(product_url)
+    if variants is None:
+        return None
     return any(v.get("available") is True for v in variants)
 
 
@@ -285,12 +373,20 @@ def check_stock_via_html(product_url: str):
 
 
 def check_stock(product_url: str):
-    """Utilisé pour les sites Shopify (JSON natif, avec repli HTML si indéterminé)."""
-    result = check_stock_via_json(product_url)
-    if result is not None:
-        return result
+    """
+    Sites Shopify : JSON natif, avec repli HTML si indéterminé.
+
+    Retourne (disponible, variant_id). variant_id vaut None quand le produit
+    n'est pas en stock ou quand on a dû passer par le repli HTML : dans ce cas
+    l'alerte n'aura pas de lien panier, seulement le lien produit.
+    """
+    variants = fetch_shopify_variants(product_url)
+    if variants is not None:
+        variant_id = first_available_variant_id(variants)
+        return (variant_id is not None), variant_id
+
     print("[i] JSON indéterminé, tentative de repli via HTML...")
-    return check_stock_via_html(product_url)
+    return check_stock_via_html(product_url), None
 
 
 # --- Détection d'apparition (pages catégorie sans fiche produit dédiée) -------
@@ -329,17 +425,67 @@ def check_category_link(category_url: str, base_url: str):
     return False
 
 
+def search_shopify_products(site_info: dict):
+    """
+    Interroge le moteur de recherche Shopify et ne garde que les double packs
+    One Piece (la recherche remonte aussi des blisters Pokémon dont le titre
+    contient "Double").
+
+    Retourne une liste de dicts {handle, title, url, available}, ou None si la
+    vérification n'a pas pu être faite.
+    """
+    params = {
+        "q": site_info["search_query"],
+        "resources[type]": "product",
+        "resources[limit]": SHOPIFY_SEARCH_LIMIT,
+    }
+    try:
+        resp = SESSION.get(site_info["search_url"], params=params, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        print(f"[!] Erreur réseau (recherche Shopify) : {e}")
+        return None
+
+    if resp.status_code != 200:
+        print(f"[!] Statut HTTP inattendu sur la recherche : {resp.status_code}")
+        return None
+
+    try:
+        results = resp.json()["resources"]["results"]["products"]
+    except (ValueError, KeyError, TypeError):
+        print("[!] Réponse de recherche Shopify inexploitable.")
+        return None
+
+    base_url = site_info["base_url"].rstrip("/")
+    found = []
+    for product in results:
+        title = product.get("title", "")
+        if not (DOUBLEPACK_PATTERN.search(title) and ONEPIECE_PATTERN.search(title)):
+            continue
+        handle = product.get("handle")
+        if not handle:
+            continue
+        found.append({
+            "handle": handle,
+            "title": title,
+            # On reconstruit l'URL depuis le handle : celle du JSON traîne des
+            # paramètres de tracking (_pos, _psq...) qui changent à chaque appel
+            # et feraient croire à un changement d'état à chaque run.
+            "url": f"{base_url}/products/{handle}",
+            "available": bool(product.get("available")),
+        })
+    return found
+
+
 # --- Traitement d'un site -----------------------------------------------------
 
 def process_direct_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
     """Sites avec fiche produit connue (Shopify / HTML direct). Retourne True si l'état a changé."""
     label = site_info["label"]
     product_url = site_info["product_url"]
-    available = (
-        check_stock(product_url)
-        if site_info["mode"] == "shopify"
-        else check_stock_via_html(product_url)
-    )
+    if site_info["mode"] == "shopify":
+        available, variant_id = check_stock(product_url)
+    else:
+        available, variant_id = check_stock_via_html(product_url), None
     previous = state.get(site_key, {}).get("available")
 
     if available is None:
@@ -350,7 +496,9 @@ def process_direct_site(site_key: str, site_info: dict, state: dict, webhook_url
 
     if available and previous is not True:
         print(f">>> Passage en stock détecté sur {label}, envoi de l'alerte Discord.")
-        if not send_discord_alert(webhook_url, label, site_info["product_name"], product_url):
+        if not send_discord_alert(
+            webhook_url, label, site_info["product_name"], product_url, variant_id
+        ):
             # Alerte perdue : on ne touche pas à l'état pour la rejouer au prochain run.
             print(f"[!] Alerte {label} non délivrée, état inchangé pour réessayer plus tard.")
             return False
@@ -391,6 +539,72 @@ def process_category_site(site_key: str, site_info: dict, state: dict, webhook_u
 
     state[site_key] = {"found_url": found_url}
     return True
+
+
+def process_search_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
+    """
+    Boutique Shopify sans fiche produit fixe : on suit toutes les références qui
+    correspondent à la recherche, par handle. Deux alertes possibles par produit :
+    son apparition dans le catalogue, puis son passage en stock.
+
+    Retourne True si l'état a changé.
+    """
+    label = site_info["label"]
+    products = search_shopify_products(site_info)
+
+    if products is None:
+        print(f"Résultat indéterminé pour {label} (double packs), état conservé.")
+        return False
+
+    if not products:
+        print(f"Statut {label} (double packs) : aucune référence correspondante.")
+        return False
+
+    known = state.get(site_key, {}).get("products", {})
+    # Premier run : on enregistre la photo du catalogue sans rien notifier,
+    # sinon chaque référence déjà en ligne déclencherait une alerte d'apparition.
+    baseline = not known
+    if baseline:
+        print(f"[i] Premier passage sur {label} (double packs) : enregistrement sans alerte.")
+
+    new_known = dict(known)
+    changed = False
+
+    for product in products:
+        handle = product["handle"]
+        previous = known.get(handle)  # True / False / None (jamais vu)
+        available = product["available"]
+        print(f"  - {product['title'][:60]} : {'EN STOCK' if available else 'rupture'}")
+
+        if baseline:
+            new_known[handle] = available
+            changed = True
+            continue
+
+        if previous is None:
+            print(f">>> Nouvelle référence détectée sur {label}, envoi de l'alerte Discord.")
+            if not send_discord_new_product(webhook_url, label, product["title"], product["url"]):
+                print(f"[!] Alerte {label} non délivrée, référence non enregistrée pour réessayer.")
+                continue
+
+        if available and previous is not True:
+            print(f">>> Passage en stock détecté sur {label}, envoi de l'alerte Discord.")
+            # Le JSON de recherche ne donne pas les identifiants de variantes :
+            # on va les chercher sur la fiche produit pour le lien panier.
+            variant_id = first_available_variant_id(fetch_shopify_variants(product["url"]))
+            if not send_discord_alert(
+                webhook_url, label, product["title"], product["url"], variant_id
+            ):
+                print(f"[!] Alerte {label} non délivrée, état inchangé pour réessayer plus tard.")
+                continue
+
+        if previous != available:
+            new_known[handle] = available
+            changed = True
+
+    if changed:
+        state[site_key] = {"products": new_known}
+    return changed
 
 
 # --- Point d'entrée -------------------------------------------------------------
@@ -440,6 +654,8 @@ def main() -> int:
         try:
             if site_info["mode"] in ("shopify", "html_direct"):
                 changed = process_direct_site(site_key, site_info, state, webhook_url)
+            elif site_info["mode"] == "shopify_search":
+                changed = process_search_site(site_key, site_info, state, webhook_url)
             else:
                 changed = process_category_site(site_key, site_info, state, webhook_url)
         except Exception as e:  # noqa: BLE001 - un site cassé ne doit pas bloquer les autres
