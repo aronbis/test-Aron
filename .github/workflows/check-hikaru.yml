@@ -47,7 +47,10 @@ jobs:
           # par la tâche launchd du Mac (voir local/README.md).
           # L'inventaire à la demande, lui, les interroge quand même : il doit
           # dire explicitement quelles boutiques n'ont pas pu être vérifiées.
-          MONITOR_SITES: ${{ github.event.inputs.report == 'true' && '' || 'hikaru,hikaru_one_piece,king_jouet,leclerc' }}
+          # Attention : en syntaxe GitHub, "cond && '' || autre" renvoie toujours
+          # "autre", la chaîne vide étant falsy. Les deux branches doivent donc
+          # être non vides — d'où la liste complète écrite en toutes lettres.
+          MONITOR_SITES: ${{ github.event.inputs.report == 'true' && 'hikaru,hikaru_one_piece,king_jouet,fnac,smyths,cultura,leclerc' || 'hikaru,hikaru_one_piece,king_jouet,leclerc' }}
         run: python monitor_hikaru_once.py
       # always() : même si l'étape précédente sort en erreur (un site cassé),
       # l'état des sites qui ont bien répondu doit être sauvegardé.
