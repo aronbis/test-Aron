@@ -1283,6 +1283,91 @@ def poll_discord_commands(token: str, channel_id: str, after_id):
     return declenche, str(dernier_id)
 
 
+def run_discord_diagnose() -> int:
+    """
+    Diagnostic de la configuration du bot : dit lequel des maillons casse.
+
+    Un 403 à la lecture d'un salon peut venir d'un bot absent du serveur, d'un
+    identifiant de salon erroné (celui du serveur, par exemple) ou d'une
+    permission manquante. Ces trois causes se distinguent en interrogeant
+    Discord, pas en relisant les cases cochées.
+    """
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    channel_id = os.environ.get("DISCORD_CHANNEL_ID", "").strip()
+    entetes = {"Authorization": f"Bot {token}"}
+
+    print("=== Diagnostic Discord ===")
+    if not token:
+        print("[!] DISCORD_BOT_TOKEN est vide.")
+        return 1
+    if not channel_id:
+        print("[!] DISCORD_CHANNEL_ID est vide.")
+        return 1
+    print(f"Identifiant de salon configuré : {channel_id}")
+
+    def appel(chemin):
+        try:
+            r = SESSION.get(f"{DISCORD_API}{chemin}", headers=entetes, timeout=TIMEOUT)
+        except requests.RequestException as e:
+            print(f"[!] Erreur réseau sur {chemin} : {e}")
+            return None
+        return r
+
+    # 1. Le token est-il valide, et à quel bot correspond-il ?
+    r = appel("/users/@me")
+    if r is None:
+        return 1
+    if r.status_code != 200:
+        print(f"[!] Token refusé (HTTP {r.status_code}) : {r.text[:200]}")
+        return 1
+    moi = r.json()
+    print(f"Bot authentifié : {moi.get('username')}#{moi.get('discriminator')} "
+          f"(id {moi.get('id')})")
+
+    # 2. Sur quels serveurs le bot est-il réellement présent ?
+    r = appel("/users/@me/guilds")
+    if r is not None and r.status_code == 200:
+        serveurs = r.json()
+        if not serveurs:
+            print("[!] Le bot n'est membre d'AUCUN serveur : l'invitation n'a pas abouti.")
+        else:
+            print(f"Serveurs du bot ({len(serveurs)}) :")
+            for s in serveurs:
+                print(f"   - {s.get('name')} (id {s.get('id')})")
+    else:
+        code = r.status_code if r is not None else "?"
+        print(f"[!] Impossible de lister les serveurs (HTTP {code}).")
+
+    # 3. Le salon visé est-il atteignable, et est-ce bien un salon ?
+    r = appel(f"/channels/{channel_id}")
+    if r is None:
+        return 1
+    if r.status_code == 200:
+        salon = r.json()
+        print(f"Salon accessible : #{salon.get('name')} "
+              f"(type {salon.get('type')}, serveur {salon.get('guild_id')})")
+        r2 = appel(f"/channels/{channel_id}/messages?limit=1")
+        code2 = r2.status_code if r2 is not None else "?"
+        if code2 == 200:
+            print("Lecture de l'historique : OK — la commande !stock est opérationnelle.")
+            return 0
+        print(f"[!] Lecture de l'historique refusée (HTTP {code2}) : "
+              "il manque 'Voir les anciens messages' sur ce salon.")
+        return 1
+
+    detail = ""
+    try:
+        detail = f" (code Discord {r.json().get('code')} : {r.json().get('message')})"
+    except ValueError:
+        pass
+    print(f"[!] Salon inaccessible : HTTP {r.status_code}{detail}")
+    print("    Code 50001 'Missing Access' : le bot est sur le serveur mais ne voit")
+    print("      pas ce salon, ou l'identifiant appartient à un autre serveur.")
+    print("    Code 10003 'Unknown Channel' : l'identifiant n'est pas celui d'un")
+    print("      salon — c'est souvent celui du serveur, copié par erreur.")
+    return 1
+
+
 def handle_discord_commands(state: dict, webhook_url: str, sites: dict) -> bool:
     """
     Traite une éventuelle commande postée dans le salon. Retourne True si l'état
@@ -1424,6 +1509,9 @@ def main() -> int:
     if not webhook_url:
         print("ERREUR : la variable d'environnement DISCORD_WEBHOOK_URL n'est pas définie.")
         return 1
+
+    if os.environ.get("DIAGNOSE", "").strip().lower() == "true":
+        return run_discord_diagnose()
 
     if os.environ.get("TEST_ALERT", "").strip().lower() == "true":
         return run_test_alert(webhook_url)
