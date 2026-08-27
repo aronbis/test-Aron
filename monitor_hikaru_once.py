@@ -1361,6 +1361,16 @@ def run_discord_diagnose() -> int:
     except ValueError:
         pass
     print(f"[!] Salon inaccessible : HTTP {r.status_code}{detail}")
+
+    # Témoin : le même appel avec un token volontairement invalide. Discord
+    # authentifie APRÈS ses protections réseau, donc une IP acceptée répond 401.
+    # Toute autre réponse signe un filtrage réseau, antérieur à l'authentification,
+    # et disculpe la configuration du bot.
+    temoin = SESSION.get(f"{DISCORD_API}/channels/123456789012345678/messages?limit=1",
+                         headers={"Authorization": "Bot faux_token_de_test"},
+                         timeout=TIMEOUT)
+    print(f"    Témoin (token invalide) : HTTP {temoin.status_code} — "
+          f"{'401 attendu depuis une IP acceptée' if temoin.status_code == 401 else 'ANOMALIE : filtrage réseau côté Discord'}")
     print("    Code 50001 'Missing Access' : le bot est sur le serveur mais ne voit")
     print("      pas ce salon, ou l'identifiant appartient à un autre serveur.")
     print("    Code 10003 'Unknown Channel' : l'identifiant n'est pas celui d'un")
