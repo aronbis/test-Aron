@@ -1188,17 +1188,9 @@ def run_test_alert(webhook_url: str) -> int:
     return 1
 
 
-def report_sites() -> dict:
-    """
-    Périmètre de l'inventaire, qui peut être plus large que la surveillance
-    courante : la machine qui écoute Discord n'est pas forcément celle qui
-    surveille tous les sites, et un inventaire doit couvrir ce qu'elle peut
-    réellement atteindre. À défaut de REPORT_SITES, on reprend MONITOR_SITES.
-    """
-    return selected_sites("REPORT_SITES") or selected_sites()
 
 
-def selected_sites(variable: str = "MONITOR_SITES") -> dict:
+def selected_sites() -> dict:
     """
     Sites à vérifier sur cette machine.
 
@@ -1209,210 +1201,23 @@ def selected_sites(variable: str = "MONITOR_SITES") -> dict:
 
     Exemple : MONITOR_SITES="cultura,fnac"
     """
-    demandes = os.environ.get(variable, "").strip()
+    demandes = os.environ.get("MONITOR_SITES", "").strip()
     if not demandes:
-        return SITES if variable == "MONITOR_SITES" else {}
+        return SITES
     voulus = [k.strip() for k in demandes.split(",") if k.strip()]
     inconnus = [k for k in voulus if k not in SITES]
     if inconnus:
-        print(f"[!] {variable} : clés inconnues ignorées {inconnus} "
+        print(f"[!] MONITOR_SITES : clés inconnues ignorées {inconnus} "
               f"(disponibles : {', '.join(SITES)})")
     return {k: SITES[k] for k in voulus if k in SITES}
 
 
-DISCORD_API = "https://discord.com/api/v10"
-# Écrire l'un de ces mots dans le salon surveillé déclenche l'inventaire.
-COMMAND_TRIGGERS = ("!stock", "!dispo", "!inventaire")
-# Clés d'état qui ne correspondent pas à un site et que la purge doit épargner.
-RESERVED_STATE_KEYS = ("_discord",)
 
 
-def poll_discord_commands(token: str, channel_id: str, after_id):
-    """
-    Lit les messages postés dans le salon depuis le dernier run.
-
-    Un webhook Discord n'est qu'un tuyau sortant : pour lire une commande il
-    faut un bot. On interroge l'API REST plutôt que d'ouvrir une connexion
-    permanente, ce qui cadre avec un script qui s'exécute puis se termine.
-
-    Retourne (déclenché, dernier_id_vu). `déclenché` vaut False au tout premier
-    passage : sans ça, une vieille commande restée dans l'historique relancerait
-    un inventaire à chaque nouvelle installation.
-    """
-    url = f"{DISCORD_API}/channels/{channel_id}/messages"
-    params = {"limit": 50}
-    if after_id:
-        params["after"] = after_id  # ne renvoie que les messages plus récents
-
-    try:
-        resp = SESSION.get(url, params=params,
-                           headers={"Authorization": f"Bot {token}"}, timeout=TIMEOUT)
-    except requests.RequestException as e:
-        print(f"[!] Erreur réseau (lecture Discord) : {e}")
-        return False, after_id
-
-    if resp.status_code == 401:
-        print("[!] Token de bot Discord refusé (401). Vérifiez le secret DISCORD_BOT_TOKEN.")
-        return False, after_id
-    if resp.status_code == 403:
-        print("[!] Le bot n'a pas accès à ce salon (403). Vérifiez ses permissions.")
-        return False, after_id
-    if resp.status_code != 200:
-        print(f"[!] Statut inattendu à la lecture Discord : {resp.status_code}")
-        return False, after_id
-
-    try:
-        messages = resp.json()
-    except ValueError:
-        print("[!] Réponse Discord illisible.")
-        return False, after_id
-    if not isinstance(messages, list) or not messages:
-        return False, after_id
-
-    # L'API renvoie du plus récent au plus ancien.
-    dernier_id = max(int(m["id"]) for m in messages if m.get("id"))
-
-    if not after_id:
-        print(f"[i] Premier passage sur le salon Discord : {len(messages)} message(s) "
-              "ignorés, seules les commandes à venir seront prises en compte.")
-        return False, str(dernier_id)
-
-    declenche = False
-    for message in messages:
-        if message.get("author", {}).get("bot"):
-            continue  # nos propres alertes ne sont pas des commandes
-        contenu = (message.get("content") or "").strip().lower()
-        if not contenu:
-            # Le champ arrive vide si l'intent "Message Content" n'est pas activé.
-            continue
-        if any(contenu.startswith(mot) for mot in COMMAND_TRIGGERS):
-            auteur = message.get("author", {}).get("username", "?")
-            print(f">>> Commande Discord reçue de {auteur} : {contenu[:40]!r}")
-            declenche = True
-
-    return declenche, str(dernier_id)
 
 
-def run_discord_diagnose() -> int:
-    """
-    Diagnostic de la configuration du bot : dit lequel des maillons casse.
-
-    Un 403 à la lecture d'un salon peut venir d'un bot absent du serveur, d'un
-    identifiant de salon erroné (celui du serveur, par exemple) ou d'une
-    permission manquante. Ces trois causes se distinguent en interrogeant
-    Discord, pas en relisant les cases cochées.
-    """
-    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
-    channel_id = os.environ.get("DISCORD_CHANNEL_ID", "").strip()
-    entetes = {"Authorization": f"Bot {token}"}
-
-    print("=== Diagnostic Discord ===")
-    if not token:
-        print("[!] DISCORD_BOT_TOKEN est vide.")
-        return 1
-    if not channel_id:
-        print("[!] DISCORD_CHANNEL_ID est vide.")
-        return 1
-    print(f"Identifiant de salon configuré : {channel_id}")
-
-    def appel(chemin):
-        try:
-            r = SESSION.get(f"{DISCORD_API}{chemin}", headers=entetes, timeout=TIMEOUT)
-        except requests.RequestException as e:
-            print(f"[!] Erreur réseau sur {chemin} : {e}")
-            return None
-        return r
-
-    # 1. Le token est-il valide, et à quel bot correspond-il ?
-    r = appel("/users/@me")
-    if r is None:
-        return 1
-    if r.status_code != 200:
-        print(f"[!] Token refusé (HTTP {r.status_code}) : {r.text[:200]}")
-        return 1
-    moi = r.json()
-    print(f"Bot authentifié : {moi.get('username')}#{moi.get('discriminator')} "
-          f"(id {moi.get('id')})")
-
-    # 2. Sur quels serveurs le bot est-il réellement présent ?
-    r = appel("/users/@me/guilds")
-    if r is not None and r.status_code == 200:
-        serveurs = r.json()
-        if not serveurs:
-            print("[!] Le bot n'est membre d'AUCUN serveur : l'invitation n'a pas abouti.")
-        else:
-            print(f"Serveurs du bot ({len(serveurs)}) :")
-            for s in serveurs:
-                print(f"   - {s.get('name')} (id {s.get('id')})")
-    else:
-        code = r.status_code if r is not None else "?"
-        print(f"[!] Impossible de lister les serveurs (HTTP {code}).")
-
-    # 3. Le salon visé est-il atteignable, et est-ce bien un salon ?
-    r = appel(f"/channels/{channel_id}")
-    if r is None:
-        return 1
-    if r.status_code == 200:
-        salon = r.json()
-        print(f"Salon accessible : #{salon.get('name')} "
-              f"(type {salon.get('type')}, serveur {salon.get('guild_id')})")
-        r2 = appel(f"/channels/{channel_id}/messages?limit=1")
-        code2 = r2.status_code if r2 is not None else "?"
-        if code2 == 200:
-            print("Lecture de l'historique : OK — la commande !stock est opérationnelle.")
-            return 0
-        print(f"[!] Lecture de l'historique refusée (HTTP {code2}) : "
-              "il manque 'Voir les anciens messages' sur ce salon.")
-        return 1
-
-    detail = ""
-    try:
-        detail = f" (code Discord {r.json().get('code')} : {r.json().get('message')})"
-    except ValueError:
-        pass
-    print(f"[!] Salon inaccessible : HTTP {r.status_code}{detail}")
-
-    # Témoin : le même appel avec un token volontairement invalide. Discord
-    # authentifie APRÈS ses protections réseau, donc une IP acceptée répond 401.
-    # Toute autre réponse signe un filtrage réseau, antérieur à l'authentification,
-    # et disculpe la configuration du bot.
-    temoin = SESSION.get(f"{DISCORD_API}/channels/123456789012345678/messages?limit=1",
-                         headers={"Authorization": "Bot faux_token_de_test"},
-                         timeout=TIMEOUT)
-    print(f"    Témoin (token invalide) : HTTP {temoin.status_code} — "
-          f"{'401 attendu depuis une IP acceptée' if temoin.status_code == 401 else 'ANOMALIE : filtrage réseau côté Discord'}")
-    print("    Code 50001 'Missing Access' : le bot est sur le serveur mais ne voit")
-    print("      pas ce salon, ou l'identifiant appartient à un autre serveur.")
-    print("    Code 10003 'Unknown Channel' : l'identifiant n'est pas celui d'un")
-    print("      salon — c'est souvent celui du serveur, copié par erreur.")
-    return 1
 
 
-def handle_discord_commands(state: dict, webhook_url: str, sites: dict) -> bool:
-    """
-    Traite une éventuelle commande postée dans le salon. Retourne True si l'état
-    a changé. Sans token de bot configuré, la fonction ne fait rien : la
-    surveillance normale continue de tourner sans cette fonctionnalité.
-    """
-    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
-    channel_id = os.environ.get("DISCORD_CHANNEL_ID", "").strip()
-    if not token or not channel_id:
-        return False
-
-    after_id = state.get("_discord", {}).get("last_message_id")
-    declenche, dernier_id = poll_discord_commands(token, channel_id, after_id)
-
-    if declenche:
-        # L'inventaire est envoyé avant d'enregistrer le nouvel identifiant :
-        # si l'envoi échoue, la commande sera rejouée au run suivant.
-        if run_report(webhook_url, sites) != 0:
-            print("[!] Inventaire non envoyé, la commande sera rejouée.")
-            return False
-
-    if dernier_id != after_id:
-        state["_discord"] = {"last_message_id": dernier_id}
-        return True
-    return False
 
 
 def collect_available(sites: dict):
@@ -1530,9 +1335,6 @@ def main() -> int:
         print("ERREUR : la variable d'environnement DISCORD_WEBHOOK_URL n'est pas définie.")
         return 1
 
-    if os.environ.get("DIAGNOSE", "").strip().lower() == "true":
-        return run_discord_diagnose()
-
     if os.environ.get("TEST_ALERT", "").strip().lower() == "true":
         return run_test_alert(webhook_url)
 
@@ -1544,22 +1346,17 @@ def main() -> int:
     # Inventaire à la demande : envoie la liste de tout ce qui est commandable
     # maintenant, sans rien changer à l'état ni au suivi des alertes.
     if os.environ.get("REPORT", "").strip().lower() == "true":
-        return run_report(webhook_url, report_sites())
+        return run_report(webhook_url, sites)
 
     state = load_state()
 
     # Purge des sites qui ne sont plus surveillés (ex. un site retiré de SITES),
     # pour que state_stock.json reste le miroir exact de la config.
-    obsolete = [key for key in state if key not in SITES and key not in RESERVED_STATE_KEYS]
+    obsolete = [key for key in state if key not in SITES]
     for key in obsolete:
         print(f"[i] Purge de l'entrée obsolète '{key}' dans l'état.")
         del state[key]
     state_changed = bool(obsolete)
-
-    # Une commande postée dans le salon Discord relance l'inventaire complet,
-    # sans interrompre la surveillance habituelle qui suit.
-    if handle_discord_commands(state, webhook_url, report_sites()):
-        state_changed = True
 
     failures = 0
     for site_key, site_info in sites.items():

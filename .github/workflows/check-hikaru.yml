@@ -15,11 +15,6 @@ on:
         required: false
         type: boolean
         default: false
-      diagnose:
-        description: "Diagnostiquer la configuration du bot Discord (n'envoie rien)"
-        required: false
-        type: boolean
-        default: false
 permissions:
   contents: write  # nécessaire pour committer state_stock.json
 # cron-job.org peut déclencher un run alors que le précédent tourne encore :
@@ -45,14 +40,8 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          # Pas de secrets de bot ici : Discord filtre les IP des runners
-          # GitHub sur ses endpoints de salon. Mesuré — le même appel avec un
-          # token invalide répond 401 depuis une IP résidentielle mais 403
-          # (code 40333) depuis la CI, donc le rejet précède l'authentification.
-          # L'écoute de "!stock" tourne sur le Mac, voir local/README.md.
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
           REPORT: ${{ github.event.inputs.report }}
-          DIAGNOSE: ${{ github.event.inputs.diagnose }}
           # Cultura, Fnac et Smyths refusent les IP des runners GitHub : les
           # interroger d'ici ne produit que des "indéterminé". Cultura est repris
           # par la tâche launchd du Mac (voir local/README.md).

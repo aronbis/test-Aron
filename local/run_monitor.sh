@@ -23,17 +23,6 @@ export DISCORD_USER_ID
 export MONITOR_SITES="${MONITOR_SITES:-cultura}"
 export MONITOR_STATE_FILE="$BASE/state_local.json"
 
-# Écoute de la commande "!stock" dans Discord. Elle vit ici et pas dans la CI :
-# Discord filtre les IP GitHub sur ses endpoints de salon. Facultatif — sans ces
-# deux entrées de trousseau, la surveillance tourne sans la commande.
-DISCORD_BOT_TOKEN="$(security find-generic-password -s one-piece-discord-bot -w 2>/dev/null || true)"
-DISCORD_CHANNEL_ID="$(security find-generic-password -s one-piece-discord-channel -w 2>/dev/null || true)"
-export DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID
-
-# L'inventaire déclenché par "!stock" couvre tout ce que le Mac sait atteindre,
-# pas seulement les sites que cette machine surveille en continu. Fnac et Smyths
-# en sont exclus : ils bloquent aussi depuis une IP résidentielle.
-export REPORT_SITES="${REPORT_SITES:-hikaru,king_jouet,cultura,leclerc,granderecre,orchestra}"
 
 {
   echo "===== $(date '+%F %T') ====="
