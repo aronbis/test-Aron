@@ -1210,6 +1210,106 @@ def selected_sites() -> dict:
     return {k: SITES[k] for k in voulus if k in SITES}
 
 
+DISCORD_API = "https://discord.com/api/v10"
+# Écrire l'un de ces mots dans le salon surveillé déclenche l'inventaire.
+COMMAND_TRIGGERS = ("!stock", "!dispo", "!inventaire")
+# Clés d'état qui ne correspondent pas à un site et que la purge doit épargner.
+RESERVED_STATE_KEYS = ("_discord",)
+
+
+def poll_discord_commands(token: str, channel_id: str, after_id):
+    """
+    Lit les messages postés dans le salon depuis le dernier run.
+
+    Un webhook Discord n'est qu'un tuyau sortant : pour lire une commande il
+    faut un bot. On interroge l'API REST plutôt que d'ouvrir une connexion
+    permanente, ce qui cadre avec un script qui s'exécute puis se termine.
+
+    Retourne (déclenché, dernier_id_vu). `déclenché` vaut False au tout premier
+    passage : sans ça, une vieille commande restée dans l'historique relancerait
+    un inventaire à chaque nouvelle installation.
+    """
+    url = f"{DISCORD_API}/channels/{channel_id}/messages"
+    params = {"limit": 50}
+    if after_id:
+        params["after"] = after_id  # ne renvoie que les messages plus récents
+
+    try:
+        resp = SESSION.get(url, params=params,
+                           headers={"Authorization": f"Bot {token}"}, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        print(f"[!] Erreur réseau (lecture Discord) : {e}")
+        return False, after_id
+
+    if resp.status_code == 401:
+        print("[!] Token de bot Discord refusé (401). Vérifiez le secret DISCORD_BOT_TOKEN.")
+        return False, after_id
+    if resp.status_code == 403:
+        print("[!] Le bot n'a pas accès à ce salon (403). Vérifiez ses permissions.")
+        return False, after_id
+    if resp.status_code != 200:
+        print(f"[!] Statut inattendu à la lecture Discord : {resp.status_code}")
+        return False, after_id
+
+    try:
+        messages = resp.json()
+    except ValueError:
+        print("[!] Réponse Discord illisible.")
+        return False, after_id
+    if not isinstance(messages, list) or not messages:
+        return False, after_id
+
+    # L'API renvoie du plus récent au plus ancien.
+    dernier_id = max(int(m["id"]) for m in messages if m.get("id"))
+
+    if not after_id:
+        print(f"[i] Premier passage sur le salon Discord : {len(messages)} message(s) "
+              "ignorés, seules les commandes à venir seront prises en compte.")
+        return False, str(dernier_id)
+
+    declenche = False
+    for message in messages:
+        if message.get("author", {}).get("bot"):
+            continue  # nos propres alertes ne sont pas des commandes
+        contenu = (message.get("content") or "").strip().lower()
+        if not contenu:
+            # Le champ arrive vide si l'intent "Message Content" n'est pas activé.
+            continue
+        if any(contenu.startswith(mot) for mot in COMMAND_TRIGGERS):
+            auteur = message.get("author", {}).get("username", "?")
+            print(f">>> Commande Discord reçue de {auteur} : {contenu[:40]!r}")
+            declenche = True
+
+    return declenche, str(dernier_id)
+
+
+def handle_discord_commands(state: dict, webhook_url: str, sites: dict) -> bool:
+    """
+    Traite une éventuelle commande postée dans le salon. Retourne True si l'état
+    a changé. Sans token de bot configuré, la fonction ne fait rien : la
+    surveillance normale continue de tourner sans cette fonctionnalité.
+    """
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    channel_id = os.environ.get("DISCORD_CHANNEL_ID", "").strip()
+    if not token or not channel_id:
+        return False
+
+    after_id = state.get("_discord", {}).get("last_message_id")
+    declenche, dernier_id = poll_discord_commands(token, channel_id, after_id)
+
+    if declenche:
+        # L'inventaire est envoyé avant d'enregistrer le nouvel identifiant :
+        # si l'envoi échoue, la commande sera rejouée au run suivant.
+        if run_report(webhook_url, sites) != 0:
+            print("[!] Inventaire non envoyé, la commande sera rejouée.")
+            return False
+
+    if dernier_id != after_id:
+        state["_discord"] = {"last_message_id": dernier_id}
+        return True
+    return False
+
+
 def collect_available(sites: dict):
     """
     Inventaire ponctuel : tout le One Piece TCG commandable à cet instant.
@@ -1342,11 +1442,16 @@ def main() -> int:
 
     # Purge des sites qui ne sont plus surveillés (ex. un site retiré de SITES),
     # pour que state_stock.json reste le miroir exact de la config.
-    obsolete = [key for key in state if key not in SITES]
+    obsolete = [key for key in state if key not in SITES and key not in RESERVED_STATE_KEYS]
     for key in obsolete:
         print(f"[i] Purge de l'entrée obsolète '{key}' dans l'état.")
         del state[key]
     state_changed = bool(obsolete)
+
+    # Une commande postée dans le salon Discord relance l'inventaire complet,
+    # sans interrompre la surveillance habituelle qui suit.
+    if handle_discord_commands(state, webhook_url, sites):
+        state_changed = True
 
     failures = 0
     for site_key, site_info in sites.items():

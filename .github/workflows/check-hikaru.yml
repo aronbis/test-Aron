@@ -40,6 +40,11 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+          # Facultatifs : sans eux, la commande "!stock" dans Discord est
+          # simplement inactive, la surveillance tourne normalement.
+          # Marche à suivre dans DISCORD.md.
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
           REPORT: ${{ github.event.inputs.report }}
           # Cultura, Fnac et Smyths refusent les IP des runners GitHub : les
