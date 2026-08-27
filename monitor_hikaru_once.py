@@ -732,6 +732,22 @@ def is_tcg_product(title: str) -> bool:
     return bool(TCG_PATTERN.search(title)) and not NOT_TCG_PATTERN.search(title)
 
 
+# Types de produits explicitement écartés du suivi, sur toutes les boutiques.
+# C'est un choix de l'utilisateur, pas une limite technique : ces références
+# sont bien détectées, on ne veut simplement pas en être alerté.
+EXCLUDED_PRODUCT_PATTERN = re.compile(
+    r"starter[\s\-]?deck|deck de d[ée]marrage|deck d[ée]butant|beginners? deck|"
+    r"\bst[\s\-]?\d{1,2}\b|"
+    r"devil[\s\-]?fruit|fruits? du d[ée]mon",
+    re.IGNORECASE,
+)
+
+
+def is_wanted_product(title: str) -> bool:
+    """False pour les starter decks et les collections Fruits du Démon."""
+    return not EXCLUDED_PRODUCT_PATTERN.search(title)
+
+
 # Le texte d'une vignette agrège titre, marque, disponibilité et nombre d'avis :
 # "Booster One Piece - OP09 - Asmodee Asmodee (4) INDISPONIBLE EN LIGNE en stock
 # à indisponible à 5,99 €". On coupe à la première mention de vendeur ou de
@@ -795,6 +811,8 @@ def list_category_products(site_info: dict):
         if not title or not ONEPIECE_PATTERN.search(title):
             continue
         if is_excluded_language(title) or (tcg_only and not is_tcg_product(title)):
+            continue
+        if not is_wanted_product(title):
             continue
         href = link["href"]
         products.setdefault(match.group(1), {
@@ -893,6 +911,8 @@ def scan_shopify_catalog(site_info: dict, etags: dict, known_pages: int = 0):
             if not handle or not ONEPIECE_PATTERN.search(title):
                 continue
             if is_excluded_language(title, handle, product.get("product_type", "")):
+                continue
+            if not is_wanted_product(title):
                 continue
             variants = product.get("variants", [])
             products[handle] = {
@@ -1021,8 +1041,15 @@ def process_listing_site(site_key: str, site_info: dict, state: dict, webhook_ur
         state[site_key] = {"seen": {pid: p["title"] for pid, p in products.items()}}
         return True
 
+    # Références enregistrées avant l'exclusion des starter decks et des Fruits
+    # du Démon : on les retire pour que l'état reflète le filtre en vigueur.
+    ecartes = {pid for pid, titre in known.items() if not is_wanted_product(titre)}
+    if ecartes:
+        print(f"[i] {len(ecartes)} référence(s) désormais exclues, retirées de l'état.")
+        known = {pid: titre for pid, titre in known.items() if pid not in ecartes}
+
     new_seen = dict(known)
-    changed = False
+    changed = bool(ecartes)
     for pid, product in sorted(products.items()):
         if pid in known:
             continue
