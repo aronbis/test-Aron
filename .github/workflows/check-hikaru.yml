@@ -52,7 +52,7 @@ jobs:
           # être non vides — d'où la liste complète écrite en toutes lettres.
           # "hikaru_one_piece" (tout le catalogue Hikaru) est volontairement absent
           # des deux listes : seule la promo ONE PIECE DAY'26 y est suivie.
-          MONITOR_SITES: ${{ github.event.inputs.report == 'true' && 'hikaru,king_jouet,fnac,smyths,cultura,leclerc' || 'hikaru,king_jouet,leclerc' }}
+          MONITOR_SITES: ${{ github.event.inputs.report == 'true' && 'hikaru,king_jouet,fnac,smyths,cultura,leclerc,granderecre,orchestra' || 'hikaru,king_jouet,leclerc,granderecre,orchestra' }}
         run: python monitor_hikaru_once.py
       # always() : même si l'étape précédente sort en erreur (un site cassé),
       # l'état des sites qui ont bien répondu doit être sauvegardé.

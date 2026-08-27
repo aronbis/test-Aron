@@ -148,6 +148,34 @@ SITES = {
         "tcg_filter": False,
         "check_new_status": True,
     },
+    "granderecre": {
+        "label": "La Grande Récré",
+        "product_name": "One Piece Card Game",
+        # Rayon dédié aux cartes à collectionner (toutes licences) : le filtre
+        # One Piece du listing suffit à isoler ce qui nous intéresse. Les fiches
+        # exposent du JSON-LD, on a donc aussi le stock et le prix.
+        "mode": "listing",
+        "category_url": "https://www.lagranderecre.fr/cartes-a-collectionner/",
+        "base_url": "https://www.lagranderecre.fr",
+        "product_pattern": r"/cartes-a-collectionner/([a-z0-9\-]+)\.html",
+        "tcg_filter": False,
+        "check_new_status": True,
+    },
+    "orchestra": {
+        "label": "Orchestra",
+        "product_name": "One Piece Card Game",
+        # Enseigne de puériculture, mais qui référence bien quelques boosters
+        # One Piece. Recherche généraliste, d'où le filtre TCG pour écarter les
+        # vêtements et jouets qui mentionneraient la licence.
+        "mode": "listing",
+        "category_url": "https://fr.shop-orchestra.com/fr/search?q=one+piece",
+        "base_url": "https://fr.shop-orchestra.com",
+        "product_pattern": r"-([A-Z0-9]{5,})\.html",
+        "tcg_filter": True,
+        "check_new_status": True,
+    },
+    # Micromania (défi Incapsula) et Maison de la Presse (403 Cloudflare) sont
+    # inaccessibles au script : non ajoutés, ils n'auraient produit que du bruit.
     "leclerc": {
         "label": "E.Leclerc",
         "product_name": "One Piece Card Game",
@@ -678,7 +706,9 @@ def check_category_link(category_url: str, base_url: str):
 # Les vignettes de listing sont préfixées par un badge ("Nouveauté", "Précommande",
 # "Meilleure vente") collé au titre : on le retire pour garder un nom lisible.
 LISTING_BADGE_PATTERN = re.compile(
-    r"^(nouveaut[ée]|pr[ée]commande|meilleure vente|promo|exclusivit[ée])\s*", re.IGNORECASE
+    r"^(nouveaut[ée]|pr[ée]commande|meilleure vente|promo|exclusivit[ée]|"
+    r"liste de souhaits|aper[çc]u rapide|ajouter à la wishlist)\s*",
+    re.IGNORECASE,
 )
 
 # Sur une page de résultats généraliste (E.Leclerc), "One Piece" ramène surtout
@@ -715,7 +745,13 @@ REPEATED_WORD_PATTERN = re.compile(r"\b(\w+)( \1\b)+", re.IGNORECASE)
 
 
 def clean_listing_title(raw: str) -> str:
-    title = LISTING_BADGE_PATTERN.sub("", re.sub(r"\s+", " ", raw).strip())
+    title = re.sub(r"\s+", " ", raw).strip()
+    # Plusieurs badges peuvent s'enchaîner ("Liste de souhaits Aperçu rapide ...").
+    for _ in range(4):
+        nettoye = LISTING_BADGE_PATTERN.sub("", title)
+        if nettoye == title:
+            break
+        title = nettoye
     title = LISTING_NOISE_PATTERN.sub("", title)
     title = REPEATED_WORD_PATTERN.sub(r"\1", title)       # "Asmodee Asmodee"
     title = re.sub(r"\s*\(\d+\)\s*$", "", title)          # nombre d'avis en fin
