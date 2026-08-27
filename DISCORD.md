@@ -7,13 +7,22 @@ case « Envoyer l'inventaire Discord » du workflow GitHub. `!dispo` et
 ## Comment ça marche
 
 Un webhook Discord ne sait qu'**envoyer** des messages, jamais en lire. Lire une
-commande demande donc un bot. Plutôt que de faire tourner un bot en permanence —
-ce qui supposerait un serveur allumé en continu — le run qui s'exécute déjà
-chaque minute interroge l'API Discord et regarde si un `!stock` est apparu depuis
-son passage précédent.
+commande demande donc un bot. Plutôt que d'en faire tourner un en permanence, le
+run qui s'exécute déjà chaque minute interroge l'API Discord et regarde si un
+`!stock` est apparu depuis son passage précédent.
 
-Conséquence : **la réponse peut prendre jusqu'à une minute**. C'est le prix à
-payer pour ne rien avoir à héberger.
+**Cette écoute tourne sur le Mac, pas dans GitHub Actions.** Discord filtre les
+IP des runners GitHub sur ses endpoints de salon. C'est mesuré, pas supposé : le
+même appel avec un token volontairement invalide répond `401 Unauthorized` depuis
+une IP résidentielle, mais `403` (code `40333`) depuis la CI — le rejet précède
+donc l'authentification, et aucune permission de bot n'y changerait quoi que ce
+soit.
+
+Deux conséquences :
+
+- la réponse peut prendre jusqu'à une minute, l'intervalle de la tâche launchd ;
+- **`!stock` ne répond que si le Mac est allumé.** Les alertes de stock, elles,
+  continuent de tomber 24 h/24 depuis GitHub Actions.
 
 Le dernier message lu est mémorisé dans `state_stock.json`, sous la clé
 `_discord` : une commande n'est donc jamais traitée deux fois, et les messages
@@ -30,10 +39,15 @@ Dans l'onglet **Bot** :
   et le bot ne verra jamais votre commande) ;
 - cliquez **Reset Token** et copiez le token.
 
-### 2. Ranger le token dans GitHub
+### 2. Ranger le token dans le trousseau du Mac
 
-Dans le dépôt : **Settings → Secrets and variables → Actions → New repository
-secret**, nommé `DISCORD_BOT_TOKEN`.
+```bash
+security add-generic-password -s one-piece-discord-bot -a "$USER" -w
+```
+
+La commande demande le token sans l'afficher et le range dans le trousseau
+macOS. Il n'est écrit dans aucun fichier, et n'a pas sa place dans un secret
+GitHub : la CI ne peut de toute façon pas s'en servir.
 
 Ce token donne accès à votre bot : il ne doit jamais apparaître dans un fichier
 du dépôt, ni dans un message. Si vous l'exposez par accident, utilisez
@@ -51,16 +65,28 @@ continuent de passer par le webhook existant.
 ### 4. Donner l'identifiant du salon
 
 Dans Discord : **Paramètres → Avancés → Mode développeur**, puis clic droit sur
-le salon `#stock` → **Copier l'identifiant du salon**. Ajoutez-le en secret
-GitHub sous le nom `DISCORD_CHANNEL_ID`.
+le salon → **Copier l'identifiant du salon**. Rangez-le lui aussi :
 
-### 5. Essayer
+```bash
+security add-generic-password -s one-piece-discord-channel -a "$USER" -w
+```
 
-Écrivez `!stock` dans `#stock`. L'inventaire arrive dans la minute.
+### 5. Installer et essayer
+
+```bash
+./local/install.sh
+```
+
+Puis écrivez `!stock` dans le salon. L'inventaire arrive dans la minute.
 
 ## Si rien ne se passe
 
-Les logs du workflow (onglet Actions) disent précisément quoi :
+Le journal du Mac dit précisément quoi :
+
+```bash
+tail -f ~/one-piece-monitor/monitor.log
+```
+
 
 | Message | Cause |
 |---|---|
@@ -68,5 +94,10 @@ Les logs du workflow (onglet Actions) disent précisément quoi :
 | `Le bot n'a pas accès à ce salon (403)` | bot non invité, ou sans permission de lecture |
 | aucune ligne `Commande Discord reçue` | l'intent **Message Content** n'est pas activé |
 
-Tant que les deux secrets ne sont pas renseignés, la fonctionnalité est
+Tant que les deux entrées de trousseau ne sont pas créées, la fonctionnalité est
 simplement inactive — la surveillance, elle, continue de tourner.
+
+En cas de doute sur la configuration du bot, le workflow GitHub garde une case
+**« Diagnostiquer la configuration du bot Discord »** : elle vérifie l'identité du
+bot et la liste de ses serveurs, ce qui reste valable depuis la CI. Seul l'accès
+au salon y échouera, pour la raison réseau expliquée plus haut.

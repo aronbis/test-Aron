@@ -45,11 +45,11 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          # Facultatifs : sans eux, la commande "!stock" dans Discord est
-          # simplement inactive, la surveillance tourne normalement.
-          # Marche à suivre dans DISCORD.md.
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          # Pas de secrets de bot ici : Discord filtre les IP des runners
+          # GitHub sur ses endpoints de salon. Mesuré — le même appel avec un
+          # token invalide répond 401 depuis une IP résidentielle mais 403
+          # (code 40333) depuis la CI, donc le rejet précède l'authentification.
+          # L'écoute de "!stock" tourne sur le Mac, voir local/README.md.
           TEST_ALERT: ${{ github.event.inputs.test_alert }}
           REPORT: ${{ github.event.inputs.report }}
           DIAGNOSE: ${{ github.event.inputs.diagnose }}

@@ -1188,7 +1188,17 @@ def run_test_alert(webhook_url: str) -> int:
     return 1
 
 
-def selected_sites() -> dict:
+def report_sites() -> dict:
+    """
+    Périmètre de l'inventaire, qui peut être plus large que la surveillance
+    courante : la machine qui écoute Discord n'est pas forcément celle qui
+    surveille tous les sites, et un inventaire doit couvrir ce qu'elle peut
+    réellement atteindre. À défaut de REPORT_SITES, on reprend MONITOR_SITES.
+    """
+    return selected_sites("REPORT_SITES") or selected_sites()
+
+
+def selected_sites(variable: str = "MONITOR_SITES") -> dict:
     """
     Sites à vérifier sur cette machine.
 
@@ -1199,13 +1209,13 @@ def selected_sites() -> dict:
 
     Exemple : MONITOR_SITES="cultura,fnac"
     """
-    demandes = os.environ.get("MONITOR_SITES", "").strip()
+    demandes = os.environ.get(variable, "").strip()
     if not demandes:
-        return SITES
+        return SITES if variable == "MONITOR_SITES" else {}
     voulus = [k.strip() for k in demandes.split(",") if k.strip()]
     inconnus = [k for k in voulus if k not in SITES]
     if inconnus:
-        print(f"[!] MONITOR_SITES : clés inconnues ignorées {inconnus} "
+        print(f"[!] {variable} : clés inconnues ignorées {inconnus} "
               f"(disponibles : {', '.join(SITES)})")
     return {k: SITES[k] for k in voulus if k in SITES}
 
@@ -1534,7 +1544,7 @@ def main() -> int:
     # Inventaire à la demande : envoie la liste de tout ce qui est commandable
     # maintenant, sans rien changer à l'état ni au suivi des alertes.
     if os.environ.get("REPORT", "").strip().lower() == "true":
-        return run_report(webhook_url, sites)
+        return run_report(webhook_url, report_sites())
 
     state = load_state()
 
@@ -1548,7 +1558,7 @@ def main() -> int:
 
     # Une commande postée dans le salon Discord relance l'inventaire complet,
     # sans interrompre la surveillance habituelle qui suit.
-    if handle_discord_commands(state, webhook_url, sites):
+    if handle_discord_commands(state, webhook_url, report_sites()):
         state_changed = True
 
     failures = 0
