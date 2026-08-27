@@ -1,4 +1,12 @@
 {
+  "granderecre": {
+    "seen": {
+      "booster-one-piece-op10-sang-royal": "Booster One piece OP10 Sang royal",
+      "one-piece-devil-fruit-collection-vol-3-coffret-fruit-du-bistouri": "ONE PIECE : DEVIL FRUIT COLLECTION VOL 3 - COFFRET FRUIT DU BISTOURI",
+      "one-piece-starter-deck-29": "ONE PIECE : STARTER DECK 29",
+      "starter-deck-one-piece-s22-equipage-de-barbe-blanche": "STARTER DECK ONE PIECE S22 - ÉQUIPAGE DE BARBE BLANCHE"
+    }
+  },
   "hikaru": {
     "available": false
   },
@@ -14,6 +22,11 @@
       "4582769894138": "One Piece Op12 Héritage Du Maître Booster Blister - Asmodee",
       "4582769894619": "One Piece : Starter Deck 22",
       "4582769912160": "One Piece : Devil Fruit Collection 3 FR"
+    }
+  },
+  "orchestra": {
+    "seen": {
+      "PJQSK7": "ONE PIECE Booster 12 cartes One Piece - L'héritage du Maître"
     }
   }
 }
