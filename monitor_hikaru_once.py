@@ -174,6 +174,21 @@ SITES = {
         "tcg_filter": True,
         "check_new_status": True,
     },
+    "auchan": {
+        "label": "Auchan",
+        "product_name": "One Piece Card Game",
+        # Auchan ne référence AUCUN One Piece TCG à ce jour — uniquement des
+        # LEGO et des figurines. Le site est surveillé pour l'arrivée éventuelle
+        # de cartes : le filtre TCG est donc indispensable, sans lui chaque
+        # figurine serait annoncée comme une nouvelle sortie. Fiches sans
+        # JSON-LD, d'où check_new_status à False comme chez E.Leclerc.
+        "mode": "listing",
+        "category_url": "https://www.auchan.fr/recherche?text=carte%20a%20collectionner%20one%20piece",
+        "base_url": "https://www.auchan.fr",
+        "product_pattern": r"/pr-([A-Z0-9]+)",
+        "tcg_filter": True,
+        "check_new_status": False,
+    },
     # Micromania (défi Incapsula) et Maison de la Presse (403 Cloudflare) sont
     # inaccessibles au script : non ajoutés, ils n'auraient produit que du bruit.
     "leclerc": {
@@ -1033,8 +1048,13 @@ def process_listing_site(site_key: str, site_info: dict, state: dict, webhook_ur
         print(f"Résultat indéterminé pour {label}, état conservé.")
         return False
 
-    known = state.get(site_key, {}).get("seen", {})
-    baseline = not known
+    # Le premier passage se juge à l'absence d'entrée dans l'état, PAS à une
+    # liste vide : un site qui ne référence encore aucun One Piece TCG resterait
+    # sinon éternellement "en premier passage", et la première vraie sortie y
+    # serait absorbée en silence au lieu de déclencher une alerte.
+    site_state = state.get(site_key)
+    known = (site_state or {}).get("seen", {})
+    baseline = site_state is None
     if baseline:
         print(f"[i] Premier passage sur {label} : {len(products)} références "
               "enregistrées sans alerte.")
