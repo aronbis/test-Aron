@@ -189,6 +189,18 @@ SITES = {
         "tcg_filter": True,
         "check_new_status": False,
     },
+    "grevin": {
+        "label": "Musée Grévin × One Piece",
+        "product_name": "Billets ONE PIECE – Visite + Carte (visites d'octobre)",
+        # Billetterie protégée par une file d'attente Queue-it. Les billets de
+        # septembre sont épuisés ; la vente d'octobre ouvre le 15 septembre 2026.
+        # On surveille l'URL de réservation elle-même : le serveur la redirige
+        # vers Queue-it avec l'identifiant de l'événement EN COURS, ce qui évite
+        # d'avoir à deviner celui d'octobre (grevin202610 n'existe pas encore).
+        # Voir check_queueit pour les états reconnus.
+        "mode": "queueit",
+        "target_url": "https://reservation.grevin-paris.com/tickets?partner=AAW1IkT01mzCBdHTrNnuoA&cmode=opt-in",
+    },
     # Micromania (défi Incapsula) et Maison de la Presse (403 Cloudflare) sont
     # inaccessibles au script : non ajoutés, ils n'auraient produit que du bruit.
     "leclerc": {
@@ -940,6 +952,131 @@ def scan_shopify_catalog(site_info: dict, etags: dict, known_pages: int = 0):
     return products, new_etags, complete, pages
 
 
+# --- File d'attente Queue-it (billetterie) --------------------------------------
+
+QUEUEIT_STATES = {
+    # état interne -> (libellé, faut-il alerter quand on y arrive ?)
+    "closed":    ("fermée / épuisée", False),
+    "announced": ("annoncée, compte à rebours en cours", True),
+    "open":      ("OUVERTE", True),
+    "direct":    ("billets accessibles sans file", True),
+    "unknown":   ("événement inconnu de Queue-it", False),
+}
+
+
+def check_queueit(target_url: str):
+    """
+    Suit l'URL protégée jusqu'à sa destination et en déduit l'état de la file.
+
+    Queue-it aiguille selon l'état de l'événement, et l'URL finale le trahit :
+      afterevent.aspx   -> vente terminée ou épuisée ("closed")
+      beforeevent.aspx  -> événement créé, pas encore ouvert ("announced")
+      /error?           -> identifiant inconnu ("unknown")
+      queue-it.net sans ces marqueurs -> la file est ouverte ("open")
+      pas de Queue-it du tout -> billetterie atteinte directement ("direct")
+
+    Retourne (état, identifiant d'événement, URL finale), ou (None, None, None)
+    si la vérification n'a pas pu être faite.
+    """
+    try:
+        resp = SESSION.get(target_url, timeout=TIMEOUT, allow_redirects=True)
+    except requests.RequestException as e:
+        print(f"[!] Erreur réseau (Queue-it) : {e}")
+        return None, None, None
+
+    if looks_like_bot_challenge(resp):
+        print(f"[!] Billetterie bloquée par une protection anti-bot (HTTP {resp.status_code}).")
+        return None, None, None
+    if resp.status_code != 200:
+        print(f"[!] Statut HTTP inattendu sur la billetterie : {resp.status_code}")
+        return None, None, None
+
+    final_url = resp.url
+    event = re.search(r"[?&]e=([A-Za-z0-9_\-]+)", final_url)
+    event_id = event.group(1) if event else None
+    bas = final_url.lower()
+
+    if "queue-it.net" not in bas:
+        return "direct", event_id, final_url
+    if "afterevent" in bas:
+        return "closed", event_id, final_url
+    if "beforeevent" in bas:
+        return "announced", event_id, final_url
+    if "/error" in bas:
+        return "unknown", event_id, final_url
+    return "open", event_id, final_url
+
+
+def send_discord_queue_alert(webhook_url: str, site_info: dict, state: str, event_id, final_url: str) -> bool:
+    label = site_info["label"]
+    produit = site_info["product_name"]
+    target = site_info["target_url"]
+    if state == "open":
+        lignes = [
+            f"{mention_prefix()}🚨 **LA FILE D'ATTENTE EST OUVERTE — {label}**",
+            f"{produit}",
+            "",
+            f"👉 Entrez dans la file MAINTENANT : {target}",
+            "",
+            "⚠️ Cliquez depuis votre propre navigateur : la place dans la file est",
+            "attachée au navigateur qui l'ouvre, un lien reçu d'ailleurs ne la transfère pas.",
+        ]
+    elif state == "announced":
+        lignes = [
+            f"{mention_prefix()}🕐 **File d'attente annoncée — {label}**",
+            f"{produit}",
+            "Queue-it affiche un compte à rebours : l'ouverture approche.",
+            f"Page d'attente : {final_url}",
+        ]
+    else:  # direct
+        lignes = [
+            f"{mention_prefix()}🚨 **BILLETS ACCESSIBLES — {label}**",
+            f"{produit}",
+            "La billetterie répond sans passer par une file d'attente.",
+            f"👉 {target}",
+        ]
+    if event_id:
+        lignes.append(f"(événement Queue-it : {event_id})")
+    return post_discord(webhook_url, "\n".join(lignes))
+
+
+def process_queueit_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
+    """
+    Billetterie derrière Queue-it : alerte à chaque passage vers un état qui
+    permet d'agir (file annoncée, file ouverte, accès direct). Un retour vers
+    "fermée" est enregistré sans bruit. Retourne True si l'état a changé.
+    """
+    label = site_info["label"]
+    current, event_id, final_url = check_queueit(site_info["target_url"])
+    previous = state.get(site_key, {}).get("queue")
+
+    if current is None:
+        print(f"Résultat indéterminé pour {label}, état conservé ({previous}).")
+        return False
+
+    libelle, alerter = QUEUEIT_STATES.get(current, (current, False))
+    print(f"Statut {label} : file {libelle}" + (f" [{event_id}]" if event_id else ""))
+
+    if current == previous:
+        return False
+
+    if alerter and previous is not None:
+        print(f">>> Changement d'état de la file sur {label} : {previous} -> {current}, envoi de l'alerte.")
+        if not send_discord_queue_alert(webhook_url, site_info, current, event_id, final_url):
+            print(f"[!] Alerte {label} non délivrée, état inchangé pour réessayer plus tard.")
+            return False
+    elif alerter and previous is None:
+        # Premier passage directement sur un état actionnable : on alerte aussi,
+        # le moniteur peut avoir été installé après l'ouverture.
+        print(f">>> Premier passage sur {label} avec une file {libelle}, envoi de l'alerte.")
+        if not send_discord_queue_alert(webhook_url, site_info, current, event_id, final_url):
+            print(f"[!] Alerte {label} non délivrée, état inchangé pour réessayer plus tard.")
+            return False
+
+    state[site_key] = {"queue": current, "event": event_id}
+    return True
+
+
 # --- Traitement d'un site -----------------------------------------------------
 
 def process_direct_site(site_key: str, site_info: dict, state: dict, webhook_url: str) -> bool:
@@ -1303,6 +1440,19 @@ def collect_available(sites: dict):
                                     "url": produit["url"], "cart_url": None,
                                     "status": status})
 
+        elif mode == "queueit":
+            etat, event_id, final_url = check_queueit(site_info["target_url"])
+            if etat is None:
+                inconnus.append(f"{label} — vérification impossible")
+            elif etat in ("open", "direct"):
+                trouves.append({"label": label, "title": site_info["product_name"],
+                                "url": site_info["target_url"], "cart_url": None,
+                                "status": "in_stock"})
+            else:
+                libelle = QUEUEIT_STATES.get(etat, (etat,))[0]
+                inconnus.append(f"{label} — file {libelle}"
+                                + (f" ({event_id})" if event_id else ""))
+
         else:  # category : Fnac, Smyths
             inconnus.append(f"{label} — bloqué par sa protection anti-bot")
 
@@ -1391,6 +1541,8 @@ def main() -> int:
                 changed = process_jsonld_site(site_key, site_info, state, webhook_url)
             elif mode == "listing":
                 changed = process_listing_site(site_key, site_info, state, webhook_url)
+            elif mode == "queueit":
+                changed = process_queueit_site(site_key, site_info, state, webhook_url)
             else:
                 changed = process_category_site(site_key, site_info, state, webhook_url)
         except Exception as e:  # noqa: BLE001 - un site cassé ne doit pas bloquer les autres
