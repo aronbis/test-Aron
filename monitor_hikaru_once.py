@@ -1449,9 +1449,12 @@ def collect_available(sites: dict):
                                 "url": site_info["target_url"], "cart_url": None,
                                 "status": "in_stock"})
             else:
+                # Le lien est donné même file fermée : c'est celui à garder sous
+                # la main pour le jour de l'ouverture.
                 libelle = QUEUEIT_STATES.get(etat, (etat,))[0]
                 inconnus.append(f"{label} — file {libelle}"
-                                + (f" ({event_id})" if event_id else ""))
+                                + (f" ({event_id})" if event_id else "")
+                                + f"\n  👉 lien à ouvrir le jour J : {site_info['target_url']}")
 
         else:  # category : Fnac, Smyths
             inconnus.append(f"{label} — bloqué par sa protection anti-bot")
