@@ -9,6 +9,10 @@
       "double-pack-one-piece-op17-les-guerriers-les-plus-puissants-du-monde": "DOUBLE PACK ONE PIECE OP17 - LES GUERRIERS LES PLUS PUISSANTS DU MONDE"
     }
   },
+  "grevin": {
+    "event": "grevin202609",
+    "queue": "closed"
+  },
   "hikaru": {
     "available": false
   },
