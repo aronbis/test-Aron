@@ -10,8 +10,8 @@
     }
   },
   "grevin": {
-    "event": "grevin202609",
-    "queue": "closed"
+    "event": "grevin20260915",
+    "queue": "open"
   },
   "hikaru": {
     "available": false
