@@ -201,6 +201,21 @@ SITES = {
         "mode": "queueit",
         "target_url": "https://reservation.grevin-paris.com/tickets?partner=AAW1IkT01mzCBdHTrNnuoA&cmode=opt-in",
     },
+    "isekai": {
+        "label": "Isekai Alcorcón",
+        "product_name": "One Piece Card Game",
+        # Boutique espagnole, plateforme maison. La catégorie One Piece est triée
+        # du plus récent au plus ancien : toute nouveauté apparaît en page 1, qui
+        # suffit donc. Fiches sans JSON-LD : alerte d'apparition avec lien direct,
+        # sans statut de stock.
+        "mode": "listing",
+        "category_url": "https://isekai-alcorcon.es/es/c/one-piece/90",
+        "base_url": "https://isekai-alcorcon.es",
+        "product_pattern": r"/producto/[^/]+/(\d+)",
+        "tcg_filter": False,
+        "onepiece_category": True,
+        "check_new_status": False,
+    },
     # Micromania (défi Incapsula) et Maison de la Presse (403 Cloudflare) sont
     # inaccessibles au script : non ajoutés, ils n'auraient produit que du bruit.
     "leclerc": {
@@ -801,6 +816,19 @@ def clean_listing_title(raw: str) -> str:
     return re.sub(r"[\s\-–—:]+$", "", title).strip()
 
 
+def title_score(texte: str):
+    """
+    Classe les textes de liens d'une même vignette pour retrouver le vrai titre.
+    Un texte qui cite la licence ou un code de set (OP-19, EB05, ST-30...) l'emporte
+    sur les mentions de service ("LIVRAISON : DISPONIBLE", "zoom_in"), même plus
+    longues ; à égalité, le plus long gagne.
+    """
+    if not texte:
+        return (0, 0)
+    parle_one_piece = bool(ONEPIECE_PATTERN.search(texte) or TCG_PATTERN.search(texte))
+    return (1 if parle_one_piece else 0, len(texte))
+
+
 def list_category_products(site_info: dict):
     """
     Liste les produits d'une page catégorie ou de résultats, pour repérer toute
@@ -814,6 +842,7 @@ def list_category_products(site_info: dict):
     base_url = site_info["base_url"].rstrip("/")
     pattern = re.compile(site_info["product_pattern"], re.IGNORECASE)
     tcg_only = site_info.get("tcg_filter", False)
+    onepiece_only = site_info.get("onepiece_category", False)
     try:
         resp = SESSION.get(site_info["category_url"], timeout=TIMEOUT)
     except requests.RequestException as e:
@@ -829,23 +858,35 @@ def list_category_products(site_info: dict):
         return None
 
     soup = BeautifulSoup(decode_html(resp), "html.parser")
-    products = {}
+    # Une vignette contient souvent plusieurs liens vers la même fiche : l'image,
+    # une icône ("zoom_in" chez Isekai), le titre, un bouton. On garde pour chaque
+    # produit le texte le plus long, qui est le vrai titre, AVANT de filtrer : sinon
+    # le premier lien venu (l'icône) servirait de titre et tromperait les filtres.
+    candidats = {}
     for link in soup.find_all("a", href=True):
         match = pattern.search(link["href"])
         if not match:
             continue
         title = clean_listing_title(link.get_text(" ", strip=True))
-        if not title or not ONEPIECE_PATTERN.search(title):
+        pid = match.group(1)
+        if title and title_score(title) > title_score(candidats.get(pid, ("", ""))[0]):
+            candidats[pid] = (title, link["href"])
+
+    products = {}
+    for pid, (title, href) in candidats.items():
+        # Sur une catégorie déjà réservée à One Piece, exiger le nom de la licence
+        # dans le titre ferait rater les fiches nommées sobrement — "OP-19 Booster
+        # Box" chez Isekai, précisément le genre de produit recherché.
+        if not onepiece_only and not ONEPIECE_PATTERN.search(title):
             continue
         if is_excluded_language(title) or (tcg_only and not is_tcg_product(title)):
             continue
         if not is_wanted_product(title):
             continue
-        href = link["href"]
-        products.setdefault(match.group(1), {
+        products[pid] = {
             "title": title[:120],
             "url": href if href.startswith("http") else f"{base_url}/{href.lstrip('/')}",
-        })
+        }
     return products
 
 
