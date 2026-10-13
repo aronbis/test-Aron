@@ -16,6 +16,21 @@
   "hikaru": {
     "available": false
   },
+  "isekai": {
+    "seen": {
+      "1048": "One Piece Card Game English Version 3rd Anniversary Set - EN",
+      "1291": "One Piece Card Game Booster Display OP-16 - EN",
+      "1292": "3X One Piece Card Game Booster Display OP-16 - EN",
+      "1293": "6X One Piece Card Game Booster Display OP-16 - EN",
+      "1294": "12X One Piece Card Game Booster Display OP-16 - EN",
+      "1479": "Booster Box OP17",
+      "1507": "ONE PIECE TCG OP18",
+      "1511": "ONE PIECE TCG EB05",
+      "1527": "One Piece Card Game EB06",
+      "1548": "OP-19 Booster Box",
+      "1562": "One Piece Card Game - Premium Extra Booster Display PEB-01 - EN"
+    }
+  },
   "king_jouet": {
     "status": "not_online"
   },
